@@ -1,234 +1,103 @@
-name: Build Kernels
+name: Build GKI 6.1.145 with SUSFS
 
 permissions:
   contents: write
   actions: write
 
 on:
-  # push:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - '.github/workflows/**'
-  # pull_request:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - '.github/workflows/**'
   workflow_dispatch:
     inputs:
-      release_type:
-        description: "Choose Release Type"
-        required: true
+      feature_set:
+        description: "Feature Set"
         type: choice
         options:
-          - Actions
-          - Pre-Release
-          - Release
-        default: Actions
-      build_selection:
-        description: "Choose which kernels to build"
-        required: true
-        type: choice
-        options:
-          - All
-          - Test Build
-          - Android12-5.10
-          - Android13-5.10
-          - Android13-5.15
-          - Android14-5.15
-          - Android14-6.1
-          - Android15-6.6
-        default: All
+          - WKSU+SUSFS+BBG
+          - WKSU+BBG
+          - WKSU
+          - BBG
+          - None
+        default: WKSU+SUSFS+BBG
+
+      ksu_commit:
+        description: "KSU Commit / Branch / Tag optional"
+        type: string
+        default: ""
+        required: false
+
+      susfs_android14_6_1_ref:
+        description: "SUSFS branch or commit for android14-6.1"
+        type: string
+        default: "gki-android14-6.1"
+        required: false
 
 jobs:
-
-  build-test:
-    if: inputs.build_selection == 'Test Build'
-    uses: ./.github/workflows/test-build.yml
-    secrets: inherit
-
-  build-a12-5-10:
-    if: (inputs.build_selection == 'All' || inputs.build_selection == 'Android12-5.10')
-    uses: ./.github/workflows/kernel-a12-5-10.yml
-    secrets: inherit
-
-
-  build-a13-5-10:
-    if: (inputs.build_selection == 'All' || inputs.build_selection == 'Android13-5.10')
-    uses: ./.github/workflows/kernel-a13-5-10.yml
-    secrets: inherit
-
-
-  build-a13-5-15:
-    if: (inputs.build_selection == 'All' || inputs.build_selection == 'Android13-5.15')
-    uses: ./.github/workflows/kernel-a13-5-15.yml
-    secrets: inherit
-
-
-  build-a14-5-15:
-    if: (inputs.build_selection == 'All' || inputs.build_selection == 'Android14-5.15')
-    uses: ./.github/workflows/kernel-a14-5-15.yml
-    secrets: inherit
-
-
-  build-a14-6-1:
-    if: (inputs.build_selection == 'All' || inputs.build_selection == 'Android14-6.1')
-    uses: ./.github/workflows/kernel-a14-6-1.yml
-    secrets: inherit
-
-
-  build-a15-6-6:
-    if: (inputs.build_selection == 'All' || inputs.build_selection == 'Android15-6.6')
-    uses: ./.github/workflows/kernel-a15-6-6.yml
-    secrets: inherit
-
-
-  release:
+  fetch-commits:
     runs-on: ubuntu-latest
-    if: inputs.release_type != 'Actions'
-    needs:
-      - build-a12-5-10
-      - build-a13-5-10
-      - build-a13-5-15
-      - build-a14-5-15
-      - build-a14-6-1
-      - build-a15-6-6
 
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_NAME: "GKI Kernels With WKSU & SUSFS v1.5.12"
-      RELEASE_BODY: ""
+    outputs:
+      ksu_commit: ${{ steps.fetch.outputs.ksu_commit }}
+      anykernel_commit: ${{ steps.fetch.outputs.anykernel_commit }}
+      patches_commit: ${{ steps.fetch.outputs.patches_commit }}
+      susfs_commit: ${{ steps.resolve-susfs.outputs.susfs_commit }}
+
     steps:
-      - name: Download Apache Arrow's util_free_space.sh
-        run: |
-          curl -L -o util_free_space.sh https://raw.githubusercontent.com/apache/arrow/main/ci/scripts/util_free_space.sh
-          chmod +x util_free_space.sh
-          ./util_free_space.sh
-      
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Generate New Tag
-        if: inputs.release_type != 'Actions'
-        run: |
-            LATEST_TAG=$(gh api repos/${{ github.repository }}/tags --jq '.[0].name' 2>/dev/null || echo "")
-            if [ -z "$LATEST_TAG" ]; then
-              LATEST_TAG="v1.5.12-r0"
-            fi
-            
-            NEW_TAG=$(echo "$LATEST_TAG" | awk -F'-r' '{suffix=$2; if (!suffix) suffix=0; suffix++; printf "%s-r%d", $1, suffix}')
-    
-            echo "New tag: $NEW_TAG"
-            echo "NEW_TAG=${NEW_TAG}" >> $GITHUB_ENV
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@v5
+      - name: Fetch base commits
+        id: fetch
+        uses: ./.github/actions/fetch-commits
         with:
-          path: ./downloaded-artifacts
-          pattern: '*-AnyKernel3'
+          ksu_commit: ${{ inputs.ksu_commit }}
 
-      - name: Set release body
+      - name: Resolve SUSFS commit from simonpunk/susfs4ksu
+        id: resolve-susfs
+        shell: bash
         run: |
-          cat << 'EOF' > release_body.md
-      
-          **IMPORTANT DISCLAIMER**
-          This software is provided for testing and educational purposes only. Use at your own risk.
-          The developers are not responsible for any damage, data loss, or issues that may occur.
-          Please ensure you have proper backups before installation.
+          set -euo pipefail
 
-          🔹 Normal 
-          - Default kernel configuration 
-          - Standard kernel module loading behavior 
-          - Recommended for most users 
+          PROJECT_ID="simonpunk%2Fsusfs4ksu"
+          SUSFS_REF="${{ inputs.susfs_android14_6_1_ref }}"
 
-          🔹 Bypass 
-          - Includes module check bypass modifications 
-          - What are kernel modules? Kernel modules are pieces of code that can be loaded into the kernel at runtime to extend functionality (like device drivers, filesystem support, etc.). These are different from KernelSU/Magisk modules. 
-          - The Problem: Sometimes when installing a custom kernel, the device tries to load a kernel module that fails due to version mismatches, missing dependencies, or signature verification issues. This can cause boot failures or device instability. 
-          - The Solution: This version changes one line from false to true to force load the kernel module, bypassing the failure check that would normally prevent loading.
+          echo "Resolving SUSFS ref: $SUSFS_REF"
 
-          Features:
-          -> Wild KSU
-          -> Multi Manager Support for WKSU, KernelSU-Next! Needs Testing: KSU, MKSU RKSU, xxKSU, KowSU and SukiSU (Best compatibility with WKSU, no support will be provided for other managers)
-          -> SUSFS ඞ v1.5.12
-          -> Scope-Minimized Manual hooks v1.4
-          -> Ptrace Patch Support for Older Kernels (<5.16)
-          -> IPSet Support for Advanced Network Filtering
-          -> Wireguard Support
-          -> BBR v1 Support
-          -> Kernel Sound System: Basic audio support with PCM, timers, procfs info, dynamic devices, and loopback module (module found at /data/adb/lkm after install)
-          -> Added BBG support to prevent unauthorised writes to certain partitions: https://github.com/vc-teahouse/Baseband-guard
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+          resolved=""
 
-          🔹 BBG (Baseband-guard)
-          - A lightweight LSM (Linux Security Module) for Android kernel
-          - Blocks unauthorized writes to critical partitions/device nodes
-          - Prevents malicious tampering with baseband and boot chain
-          - Kernel-level protection via LSM hooks
-          - Reduces risk of soft-brick/hard-brick issues
+          until [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; do
+            RESULT=$(curl -s --fail "https://gitlab.com/api/v4/projects/${PROJECT_ID}/repository/commits/${SUSFS_REF}" || true)
 
-          Notes:
-          -> SUS SU Mode 2 will show as disabled or not compatible due to non-kprobe hooks and is not needed anymore!
-          -> Official Kernel Flasher is broken with latest susfs, try https://github.com/fatalcoder524/KernelFlasher/
-          -> **boot.img files**: Available as CI artifacts only - download from the Actions tab in the "Misc" Artifact
-          -> **Warning**: boot.img files may not boot on some devices
-          -> **Note:** For detailed commit information and component versions, please check the build summary in the "Misc" Artifact
-
-          Module: 
-          -> https://github.com/sidex15/ksu_module_susfs
-      
-          Managers:
-          -> WKSU: https://github.com/WildKernels/Wild_KSU
-          -> Next: https://github.com/KernelSU-Next/KernelSU-Next
-          EOF
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.NEW_TAG }}
-          prerelease: ${{ inputs.release_type == 'Pre-Release' }}
-          files: ""
-          name: ${{ env.RELEASE_NAME }}
-          body_path: release_body.md
-
-      - name: Upload Release Assets
-        run: |
-          shopt -s nullglob
-          anykernel_dirs=(./downloaded-artifacts/*/)
-          if [ ${#anykernel_dirs[@]} -eq 0 ]; then
-            echo "No artifact directories found under ./downloaded-artifacts; skipping upload."
-          else
-            for dir in "${anykernel_dirs[@]}"; do
-              # Check if this is an AnyKernel3 artifact directory
-              if [[ "$(basename "$dir")" == *"-AnyKernel3" ]]; then
-                artifact_name=$(basename "$dir")
-                echo "Creating ZIP for $artifact_name..."
-                # Navigate into the directory and zip its contents directly
-                cd "$dir"
-                zip -r -9 "../../${artifact_name}.zip" ./*
-                cd - > /dev/null
-                echo "Uploading ${artifact_name}.zip..."
-                gh release upload ${{ env.NEW_TAG }} "${artifact_name}.zip"
+            if [ -n "$RESULT" ]; then
+              resolved=$(echo "$RESULT" | jq -r '.id // empty')
+              if [ -n "$resolved" ] && [ "$resolved" != "null" ]; then
+                echo "Resolved SUSFS: $SUSFS_REF -> $resolved"
+                break
               fi
-            done
+            fi
+
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "GitLab API failed, attempt $RETRY_COUNT/$MAX_RETRIES. Retrying..."
+            sleep "$RETRY_DELAY"
+          done
+
+          if [ -z "$resolved" ] || [ "$resolved" = "null" ]; then
+            echo "::error::Could not resolve SUSFS ref '$SUSFS_REF' on GitLab."
+            exit 1
           fi
-            
-      - name: Send Telegram Notification
-        if: inputs.release_type != 'Actions'
-        run: |
-          RELEASE_TYPE_TEXT=""
-          if [ "${{ inputs.release_type }}" == "Pre-Release" ]; then
-            RELEASE_TYPE_TEXT="🧪 *Pre-Release*"
-          else
-            RELEASE_TYPE_TEXT="🚀 *Release*"
-          fi
-          
-          curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -F message_thread_id="${{ secrets.TELEGRAM_TOPIC_ID_GKI }}" \
-            -F text="
-            🌽 *New Kernel $RELEASE_TYPE_TEXT Uploaded*  
-            📦 *Repository:* [${{ github.repository }}](https://github.com/${{ github.repository }})  
-            ✏️ *Commit:* [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})  
-            [🔗 View GitHub Release](https://github.com/${{ github.repository }}/releases/tag/${{ env.NEW_TAG }})" \
-            -F parse_mode="Markdown"
+
+          echo "susfs_commit=$resolved" >> "$GITHUB_OUTPUT"
+
+  build-6-1-145:
+    name: Build 6.1.145-android14-2025-09
+    needs: fetch-commits
+    uses: ./.github/workflows/build.yml
+    with:
+      kernel_version: 6.1.145-android14-2025-09
+      ksu_commit: ${{ inputs.ksu_commit || needs.fetch-commits.outputs.ksu_commit }}
+      anykernel_commit: ${{ needs.fetch-commits.outputs.anykernel_commit }}
+      patches_commit: ${{ needs.fetch-commits.outputs.patches_commit }}
+      susfs_commit: ${{ needs.fetch-commits.outputs.susfs_commit }}
+      feature_set: ${{ inputs.feature_set }}
+    secrets: inherit
