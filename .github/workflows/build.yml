@@ -192,10 +192,29 @@ jobs:
         kernel_version: ${{ inputs.kernel_version }}
 
     - name: Apply Performance Patches
+      if: inputs.version == 'android14-6.1'
       uses: ./.github/actions/performance
-      if: false
       with:
         kernel_version: ${{ inputs.kernel_version }}
+
+    - name: Enable 300 Hz Timer
+      if: inputs.version == 'android14-6.1'
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
+
+        DEFCONFIG="arch/arm64/configs/gki_defconfig"
+
+        # Remove any explicitly selected timer frequency
+        sed -i -E '/^CONFIG_HZ_(100|250|300|1000)=y$/d' "$DEFCONFIG"
+        sed -i -E '/^CONFIG_HZ=[0-9]+$/d' "$DEFCONFIG"
+
+        # Select 300 Hz
+        printf '\nCONFIG_HZ_300=y\nCONFIG_HZ=300\n' >> "$DEFCONFIG"
+
+        echo "=== Timer configuration ==="
+        grep -E '^CONFIG_HZ(_[0-9]+)?=' "$DEFCONFIG" || true
 
     - name: Setup Misc Configs
       uses: ./.github/actions/misc
