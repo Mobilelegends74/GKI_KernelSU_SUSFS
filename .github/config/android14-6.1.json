@@ -2,12 +2,8 @@
   "version": "android14-6.1",
   "include": [
     {
-      "sublevel": "145",
-      "date": "2025-08"
-    },
-    {
-      "sublevel": "145",
-      "date": "2025-09"
+      "sublevel": "X",
+      "date": "lts"
     }
   ]
 }

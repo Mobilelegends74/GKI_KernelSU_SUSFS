@@ -81,6 +81,27 @@ runs:
           attempt=$((attempt+1))
         done
 
+    # Pin exact Android Common 6.1.174
+    if [[ "$VERSION" == "android14-6.1" && "${{ inputs.os_patch_level }}" == "lts" ]]; then
+      echo "Pinning kernel/common to android14-6.1.174_r00"
+      cd common
+
+      git fetch --depth=1 origin refs/tags/android14-6.1.174_r00
+      git checkout --detach FETCH_HEAD
+
+      ACTUAL_SUBLEVEL="$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')"
+
+      if [[ "$ACTUAL_SUBLEVEL" != "174" ]]; then
+        echo "ERROR: expected SUBLEVEL 174, got $ACTUAL_SUBLEVEL"
+        exit 1
+      fi
+
+      echo "Verified kernel version: 6.1.$ACTUAL_SUBLEVEL"
+      git log -1 --oneline
+
+      cd ..
+    fi
+
     # --- Non-repo steps (commented out; we only use repo now) ---
     # - name: Download manifest.xml for branch (with deprecated fallback)
     #   shell: bash
