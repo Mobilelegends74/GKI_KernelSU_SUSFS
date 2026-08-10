@@ -86,7 +86,7 @@ runs:
           echo "Pinning kernel/common to android14-6.1.174_r00"
           cd common
 
-          git fetch --depth=1 origin refs/tags/android14-6.1.174_r00
+          git fetch --depth=1 https://android.googlesource.com/kernel/common refs/tags/android14-6.1.174_r00
           git checkout --detach FETCH_HEAD
 
           ACTUAL_SUBLEVEL="$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')"
