@@ -1,0 +1,41 @@
+name: 'Setup NoMount'
+description: 'Integrate NoMount into Android kernel 6.1'
+
+runs:
+  using: composite
+  steps:
+    - name: Integrate NoMount
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
+
+        NM_DIR="${{ github.workspace }}/nomount-src"
+        NM_COMMIT="ec13c264c55c6c3ef7841a5961386ccb5917c1e1"
+
+        echo "=== Clone NoMount ==="
+        rm -rf "$NM_DIR"
+        git clone https://github.com/maxsteeel/nomount.git "$NM_DIR"
+        git -C "$NM_DIR" checkout "$NM_COMMIT"
+
+        echo "=== NoMount commit ==="
+        git -C "$NM_DIR" rev-parse HEAD
+
+        echo "=== Apply official Linux 6.1 integration patch ==="
+        patch -p1 --forward <           "$NM_DIR/kernel/patches/nomount_6.1_kernel_integration.patch"
+
+        echo "=== Copy NoMount sources ==="
+        cp -f "$NM_DIR"/kernel/src/* fs/
+
+        test -f fs/nomount.c
+        test -f fs/nomount.h
+
+        echo "=== Verify kernel hooks ==="
+        grep -q 'config NOMOUNT' fs/Kconfig
+        grep -q 'nomount.o' fs/Makefile
+
+    - name: Enable CONFIG_NOMOUNT
+      uses: ./.github/actions/set-kernel-config
+      with:
+        config_list: |
+          CONFIG_NOMOUNT=y
