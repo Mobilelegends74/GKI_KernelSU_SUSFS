@@ -161,6 +161,10 @@ jobs:
 
       uses: ./.github/actions/nomount
 
+    - name: Bouteille Cloak / PathHide
+      if: inputs.version == 'android14-6.1'
+      uses: ./.github/actions/bouteille-cloak
+
 
     - name: Baseband Guard
       if: (contains(inputs.feature_set, 'BBG') || inputs.feature_set == 'FULL')
