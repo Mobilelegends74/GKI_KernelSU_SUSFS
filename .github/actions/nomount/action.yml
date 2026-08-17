@@ -67,7 +67,7 @@ runs:
           echo
           echo "- Source: Bouteillepleine/nomount"
           echo "- Branch: suite"
-          echo "- Commit: \$NM_SHA\"
+          echo "- Commit: \\$NM_SHA\\"
           echo "- Patch: SUSFS-compatible Android 14 / Linux 6.1"
         } >> "$GITHUB_STEP_SUMMARY"
 
