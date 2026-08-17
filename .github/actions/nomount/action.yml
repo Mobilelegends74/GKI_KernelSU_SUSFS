@@ -1,57 +1,83 @@
-name: 'Setup NoMount Suite'
-description: 'Integrate latest Bouteillepleine NoMount Suite SUSFS-compatible patch'
+name: 'Setup Fresh Hookless NoMount'
+description: 'Integrate latest Bouteillepleine kbuild hookless NoMount'
 
 runs:
   using: composite
   steps:
-    - name: Integrate Latest NoMount Suite
+    - name: Integrate Fresh Hookless NoMount
       shell: bash
       working-directory: ${{ github.workspace }}/kernel/common
       run: |
         set -euo pipefail
 
-        NM_DIR="${{ github.workspace }}/nomount-suite-src"
-        NM_PATCH="$NM_DIR/kernel_patches/susfs/nomount-android14-6.1.patch"
+        echo "=== Clone latest Bouteillepleine/kbuild hookless ==="
 
-        echo "=== Clone latest Bouteillepleine NoMount Suite ==="
+        NM_SRC="${{ github.workspace }}/nomount-hookless"
 
-        rm -rf "$NM_DIR"
+        rm -rf "$NM_SRC"
 
         git clone \
           --depth 1 \
           --single-branch \
-          --branch suite \
-          https://github.com/Bouteillepleine/nomount.git \
-          "$NM_DIR"
+          --branch hookless \
+          https://github.com/Bouteillepleine/kbuild.git \
+          "$NM_SRC"
 
-        NM_SHA="$(git -C "$NM_DIR" rev-parse HEAD)"
-        NM_SHORT_SHA="$(git -C "$NM_DIR" rev-parse --short HEAD)"
-
-        echo "=== NoMount Suite HEAD ==="
-        echo "$NM_SHA"
-
-        echo "NOMOUNT_SUITE_SHA=$NM_SHA" >> "$GITHUB_ENV"
+        NM_PATCH="$NM_SRC/hookless/patches/nomount_6.1_kernel_integration.patch"
 
         if [ ! -f "$NM_PATCH" ]; then
-          echo "::error::SUSFS-compatible Android 14 / 6.1 NoMount patch not found"
+          echo "::error::Missing NoMount 6.1 integration patch"
           exit 1
         fi
 
-        echo "=== Apply latest SUSFS-compatible NoMount 6.1 patch ==="
+        test -f "$NM_SRC/hookless/src/nomount.c"
+        test -f "$NM_SRC/hookless/src/nomount.h"
 
-        patch \
-          -p1 \
-          --forward \
-          --fuzz=0 \
-          < "$NM_PATCH"
+        NM_SHA="$(git -C "$NM_SRC" rev-parse HEAD)"
+        NM_SHORT_SHA="$(git -C "$NM_SRC" rev-parse --short HEAD)"
 
-        echo "=== Verify NoMount integration ==="
+        echo "NoMount hookless HEAD: $NM_SHA"
+        echo "NOMOUNT_HOOKLESS_SHA=$NM_SHA" >> "$GITHUB_ENV"
+
+        echo "=== Install fresh NoMount source ==="
+
+        cp -f "$NM_SRC/hookless/src/nomount.c" fs/nomount.c
+        cp -f "$NM_SRC/hookless/src/nomount.h" fs/nomount.h
+
+        echo "=== Remove task_mmu hunk from upstream patch ==="
+
+        NM_PATCH_NO_TASKMMU="$RUNNER_TEMP/nomount_without_task_mmu.patch"
+
+        awk '
+          /^diff --git / {
+            skip=($0=="diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c")
+          }
+          !skip { print }
+        ' "$NM_PATCH" > "$NM_PATCH_NO_TASKMMU"
+
+        echo "=== Apply Kconfig + Makefile integration ==="
+
+        patch -p1 --forward --fuzz=1 < "$NM_PATCH_NO_TASKMMU"
+
+        echo "=== Merge task_mmu hook with SUSFS ==="
+
+        python3 \
+          "${{ github.action_path }}/merge_nomount_task_mmu.py" \
+          fs/proc/task_mmu.c
+
+        echo "=== Verify integration ==="
 
         test -f fs/nomount.c
-        test -f include/linux/nomount.h
+        test -f fs/nomount.h
 
         grep -q 'config NOMOUNT' fs/Kconfig
-        grep -q 'nomount.o' fs/Makefile
+        grep -qF 'obj-$(CONFIG_NOMOUNT) += nomount.o' fs/Makefile
+        grep -q 'nomount_spoof_mmap_metadata' fs/proc/task_mmu.c
+
+        grep -q 'netlink_kernel_create' fs/nomount.c || {
+          echo "::error::Fresh NoMount does not contain netlink engine"
+          exit 1
+        }
 
         REJECT="$(find . -type f -name '*.rej' -print -quit)"
 
@@ -60,15 +86,17 @@ runs:
           exit 1
         fi
 
-        echo "NoMount Suite integrated successfully: $NM_SHORT_SHA"
+        echo "Fresh hookless NoMount integrated: $NM_SHORT_SHA"
 
         {
-          echo "### NoMount Suite"
+          echo "### NoMount Hookless"
           echo
-          echo "- Source: Bouteillepleine/nomount"
-          echo "- Branch: suite"
-          echo "- Commit: \\$NM_SHA\\"
-          echo "- Patch: SUSFS-compatible Android 14 / Linux 6.1"
+          echo "- Source: Bouteillepleine/kbuild"
+          echo "- Branch: hookless"
+          echo "- Commit: $NM_SHA"
+          echo "- Kernel integration: Linux 6.1"
+          echo "- SUSFS task_mmu merge: enabled"
+          echo "- Netlink engine: verified"
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Enable CONFIG_NOMOUNT
