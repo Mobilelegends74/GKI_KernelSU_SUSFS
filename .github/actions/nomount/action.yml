@@ -1,38 +1,75 @@
-name: 'Setup NoMount'
-description: 'Integrate NoMount into Android kernel 6.1'
+name: 'Setup NoMount Suite'
+description: 'Integrate latest Bouteillepleine NoMount Suite SUSFS-compatible patch'
 
 runs:
   using: composite
   steps:
-    - name: Integrate NoMount
+    - name: Integrate Latest NoMount Suite
       shell: bash
       working-directory: ${{ github.workspace }}/kernel/common
       run: |
         set -euo pipefail
 
-        NM_DIR="${{ github.workspace }}/nomount-src"
-        NM_COMMIT="ec13c264c55c6c3ef7841a5961386ccb5917c1e1"
+        NM_DIR="${{ github.workspace }}/nomount-suite-src"
+        NM_PATCH="$NM_DIR/kernel_patches/susfs/nomount-android14-6.1.patch"
 
-        echo "=== Clone NoMount ==="
+        echo "=== Clone latest Bouteillepleine NoMount Suite ==="
+
         rm -rf "$NM_DIR"
-        git clone https://github.com/maxsteeel/nomount.git "$NM_DIR"
-        git -C "$NM_DIR" checkout "$NM_COMMIT"
 
-        echo "=== NoMount commit ==="
-        git -C "$NM_DIR" rev-parse HEAD
+        git clone \
+          --depth 1 \
+          --single-branch \
+          --branch suite \
+          https://github.com/Bouteillepleine/nomount.git \
+          "$NM_DIR"
 
-        echo "=== Apply official Linux 6.1 integration patch ==="
-        patch -p1 --forward <           "$NM_DIR/kernel/patches/nomount_6.1_kernel_integration.patch"
+        NM_SHA="$(git -C "$NM_DIR" rev-parse HEAD)"
+        NM_SHORT_SHA="$(git -C "$NM_DIR" rev-parse --short HEAD)"
 
-        echo "=== Copy NoMount sources ==="
-        cp -f "$NM_DIR"/kernel/src/* fs/
+        echo "=== NoMount Suite HEAD ==="
+        echo "$NM_SHA"
+
+        echo "NOMOUNT_SUITE_SHA=$NM_SHA" >> "$GITHUB_ENV"
+
+        if [ ! -f "$NM_PATCH" ]; then
+          echo "::error::SUSFS-compatible Android 14 / 6.1 NoMount patch not found"
+          exit 1
+        fi
+
+        echo "=== Apply latest SUSFS-compatible NoMount 6.1 patch ==="
+
+        patch \
+          -p1 \
+          --forward \
+          --fuzz=0 \
+          < "$NM_PATCH"
+
+        echo "=== Verify NoMount integration ==="
 
         test -f fs/nomount.c
-        test -f fs/nomount.h
+        test -f include/linux/nomount.h
 
-        echo "=== Verify kernel hooks ==="
         grep -q 'config NOMOUNT' fs/Kconfig
         grep -q 'nomount.o' fs/Makefile
+
+        REJECT="$(find . -type f -name '*.rej' -print -quit)"
+
+        if [ -n "$REJECT" ]; then
+          echo "::error::Patch reject found: $REJECT"
+          exit 1
+        fi
+
+        echo "NoMount Suite integrated successfully: $NM_SHORT_SHA"
+
+        {
+          echo "### NoMount Suite"
+          echo
+          echo "- Source: Bouteillepleine/nomount"
+          echo "- Branch: suite"
+          echo "- Commit: \$NM_SHA\"
+          echo "- Patch: SUSFS-compatible Android 14 / Linux 6.1"
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Enable CONFIG_NOMOUNT
       uses: ./.github/actions/set-kernel-config
