@@ -1,106 +1,46 @@
-name: 'Setup Fresh Hookless NoMount'
-description: 'Integrate latest Bouteillepleine kbuild hookless NoMount'
+name: 'Setup Maxsteel NoMount'
+
+description: 'Integrate maxsteeel NoMount dev'
 
 runs:
   using: composite
   steps:
-    - name: Integrate Fresh Hookless NoMount
+    - name: Integrate Maxsteel NoMount
       shell: bash
       working-directory: ${{ github.workspace }}/kernel/common
       run: |
         set -euo pipefail
 
-        echo "=== Clone latest Bouteillepleine/kbuild hookless ==="
+        echo "=== Clone maxsteeel NoMount dev ==="
 
-        NM_SRC="${{ github.workspace }}/nomount-hookless"
+        NM_SRC="${{ github.workspace }}/nomount-maxsteel"
 
         rm -rf "$NM_SRC"
 
         git clone \
           --depth 1 \
           --single-branch \
-          --branch hookless \
-          https://github.com/Bouteillepleine/kbuild.git \
+          --branch dev \
+          https://github.com/maxsteeel/nomount.git \
           "$NM_SRC"
 
-        NM_PATCH="$NM_SRC/hookless/patches/nomount_6.1_kernel_integration.patch"
+        echo "=== Install NoMount source ==="
 
-        if [ ! -f "$NM_PATCH" ]; then
-          echo "::error::Missing NoMount 6.1 integration patch"
-          exit 1
-        fi
+        mkdir -p fs/nomount
 
-        test -f "$NM_SRC/hookless/src/nomount.c"
-        test -f "$NM_SRC/hookless/src/nomount.h"
+        cp -f "$NM_SRC/kernel/src/"* fs/nomount/
 
-        NM_SHA="$(git -C "$NM_SRC" rev-parse HEAD)"
-        NM_SHORT_SHA="$(git -C "$NM_SRC" rev-parse --short HEAD)"
+        echo "=== Apply Linux 6.1 integration patch ==="
 
-        echo "NoMount hookless HEAD: $NM_SHA"
-        echo "NOMOUNT_HOOKLESS_SHA=$NM_SHA" >> "$GITHUB_ENV"
+        patch -p1 --forward --fuzz=1 < \
+          "$NM_SRC/kernel/patches/nomount_6.1_kernel_integration.patch"
 
-        echo "=== Install fresh NoMount source ==="
+        echo "=== Verify NoMount ==="
 
-        cp -f "$NM_SRC/hookless/src/nomount.c" fs/nomount.c
-        cp -f "$NM_SRC/hookless/src/nomount.h" fs/nomount.h
+        test -f fs/nomount/nomount.c
+        test -f fs/nomount/nomount.h
 
-        echo "=== Remove task_mmu hunk from upstream patch ==="
-
-        NM_PATCH_NO_TASKMMU="$RUNNER_TEMP/nomount_without_task_mmu.patch"
-
-        awk '
-          /^diff --git / {
-            skip=($0=="diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c")
-          }
-          !skip { print }
-        ' "$NM_PATCH" > "$NM_PATCH_NO_TASKMMU"
-
-        echo "=== Apply Kconfig + Makefile integration ==="
-
-        patch -p1 --forward --fuzz=1 < "$NM_PATCH_NO_TASKMMU"
-
-        echo "=== Merge task_mmu hook with SUSFS ==="
-
-        python3 \
-          "${{ github.action_path }}/merge_nomount_task_mmu.py" \
-          fs/proc/task_mmu.c
-
-        echo "=== Verify integration ==="
-
-        test -f fs/nomount.c
-        test -f fs/nomount.h
-
+        grep -qF 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile
         grep -q 'config NOMOUNT' fs/Kconfig
-        grep -qF 'obj-$(CONFIG_NOMOUNT) += nomount.o' fs/Makefile
-        grep -q 'nomount_spoof_mmap_metadata' fs/proc/task_mmu.c
 
-        grep -q 'netlink_kernel_create' fs/nomount.c || {
-          echo "::error::Fresh NoMount does not contain netlink engine"
-          exit 1
-        }
-
-        REJECT="$(find . -type f -name '*.rej' -print -quit)"
-
-        if [ -n "$REJECT" ]; then
-          echo "::error::Patch reject found: $REJECT"
-          exit 1
-        fi
-
-        echo "Fresh hookless NoMount integrated: $NM_SHORT_SHA"
-
-        {
-          echo "### NoMount Hookless"
-          echo
-          echo "- Source: Bouteillepleine/kbuild"
-          echo "- Branch: hookless"
-          echo "- Commit: $NM_SHA"
-          echo "- Kernel integration: Linux 6.1"
-          echo "- SUSFS task_mmu merge: enabled"
-          echo "- Netlink engine: verified"
-        } >> "$GITHUB_STEP_SUMMARY"
-
-    - name: Enable CONFIG_NOMOUNT
-      uses: ./.github/actions/set-kernel-config
-      with:
-        config_list: |
-          CONFIG_NOMOUNT=y
+        echo "=== Maxsteel NoMount integrated ==="
