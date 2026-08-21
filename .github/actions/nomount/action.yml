@@ -40,7 +40,7 @@ runs:
         test -f fs/nomount/nomount.c
         test -f fs/nomount/nomount.h
 
-        grep -qF 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile
-        grep -q 'config NOMOUNT' fs/Kconfig
+        grep -q 'obj-.*CONFIG_NOMOUNT.*nomount/' fs/Makefile
+        grep -q 'source "fs/nomount/Kconfig"' fs/Kconfig
 
         echo "=== Maxsteel NoMount integrated ==="
