@@ -30,11 +30,17 @@ runs:
         set -euo pipefail
 
         SUSFS_BRANCH="gki-${{ inputs.version }}"
-        SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu.git"        
 
         echo "Preparing SUSFS for branch: $SUSFS_BRANCH"
-        echo "Cloning latest from $SUSFS_BRANCH..."
-        git clone "$SUSFS_REPO" -b "$SUSFS_BRANCH" susfs4ksu
+        echo "Downloading SUSFS archive from $SUSFS_BRANCH..."
+
+        curl -L \
+          "https://gitlab.com/simonpunk/susfs4ksu/-/archive/${SUSFS_BRANCH}/susfs4ksu-${SUSFS_BRANCH}.tar.gz" \
+          -o susfs.tar.gz
+
+        tar -xzf susfs.tar.gz
+
+        mv "susfs4ksu-${SUSFS_BRANCH}" susfs4ksu
 
         if [ -n "${{ inputs.susfs_commit }}" ]; then
           echo "Checking out SUSFS commit: ${{ inputs.susfs_commit }}"
