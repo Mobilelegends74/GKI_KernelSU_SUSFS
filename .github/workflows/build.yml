@@ -168,6 +168,36 @@ jobs:
       uses: ./.github/actions/nomount
 
 
+    - name: Set AnyKernel3 Artifact Name
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        AK3_NAME="AK3_${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.android_version }}"
+
+        if [ -n "${KSU_VERSION:-}" ]; then
+          if [[ ! "$KSU_VERSION" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid KernelSU Next version: $KSU_VERSION"
+            exit 1
+          fi
+          AK3_NAME="${AK3_NAME}_KSUN_${KSU_VERSION}"
+        fi
+
+        if [ -n "${NOMOUNT_SHA:-}" ]; then
+          if [[ ! "$NOMOUNT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid NoMount SHA: $NOMOUNT_SHA"
+            exit 1
+          fi
+          AK3_NAME="${AK3_NAME}_NM_${NOMOUNT_SHA:0:7}"
+        elif [ "${{ inputs.version }}" = "android14-6.1" ]; then
+          echo "::error::NOMOUNT_SHA is missing"
+          exit 1
+        fi
+
+        echo "AnyKernel3 artifact name: $AK3_NAME"
+        echo "AK3_ARTIFACT_NAME=$AK3_NAME" >> "$GITHUB_ENV"
+
+
     - name: Baseband Guard
       if: (contains(inputs.feature_set, 'BBG') || inputs.feature_set == 'FULL')
       uses: ./.github/actions/bbg
@@ -484,7 +514,7 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ steps.extract.outputs.file_name }}-AnyKernel3
+        name: ${{ env.AK3_ARTIFACT_NAME }}
         path: ${{ github.workspace }}/AnyKernel3/**
         if-no-files-found: ignore
         compression-level: 9
