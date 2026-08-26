@@ -489,26 +489,39 @@ jobs:
         if [ -z "$KSU_INPUT" ]; then
           KSU_INPUT="dev-susfs"
         fi
+        KSU_VERSION_REF="$KSU_INPUT"
 
         # Try as branch first, fall back to commit
         if git ls-remote --heads "$KSU_REPO" "$KSU_INPUT" | grep -q .; then
           echo "Cloning KernelSU-Next from branch: $KSU_INPUT"
           git clone --branch "$KSU_INPUT" "$KSU_REPO" /tmp/kernelsu-next
           cd /tmp/kernelsu-next
-          KSUN_COMMIT=$(git rev-parse HEAD)
         else
           echo "Cloning KernelSU-Next from dev-susfs branch, then checking out commit: $KSU_INPUT"
+          KSU_VERSION_REF="dev-susfs"
           git clone --branch dev-susfs "$KSU_REPO" /tmp/kernelsu-next
           cd /tmp/kernelsu-next
-          git fetch --depth=50 origin "$KSU_INPUT"
+          git fetch --no-tags origin "$KSU_INPUT"
           git checkout "$KSU_INPUT"
-          KSUN_COMMIT="$KSU_INPUT"
         fi
 
-        # Extract version info
-        COMMITS_COUNT=$(git rev-list --count HEAD)
-        BASE_VERSION=30000
-        KSU_VERSION=$(expr $COMMITS_COUNT "+" $BASE_VERSION)
+        KSUN_COMMIT="$(git rev-parse HEAD)"
+
+        # Match KernelSU-Next/kernel/Kbuild: count the base branch history,
+        # not the number of commits retained by a shallow checkout.
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          git fetch --unshallow --no-tags origin
+        fi
+
+        BASE_BRANCH="$(git rev-parse --abbrev-ref HEAD | sed 's:-.*::')"
+        if [ "$BASE_BRANCH" = "HEAD" ]; then
+          BASE_BRANCH="$(printf '%s\n' "$KSU_VERSION_REF" | sed 's:-.*::')"
+        fi
+        git fetch --no-tags origin \
+          "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+        BASE_COMMIT="$(git merge-base HEAD "refs/remotes/origin/${BASE_BRANCH}")"
+        COMMITS_COUNT="$(git rev-list --count "$BASE_COMMIT")"
+        KSU_VERSION=$((30000 + COMMITS_COUNT))
 
         # Extract git tag
         KSU_GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "no-tag")
@@ -520,7 +533,11 @@ jobs:
           KSU_MANAGER="https://github.com/pershoot/KernelSU-Next/actions/workflows/build-manager-ci.yml"
         fi
 
-        echo "Commits count: $COMMITS_COUNT"
+        echo "KSU Ref: $KSU_VERSION_REF"
+        echo "KSU Commit: $(git rev-parse --short=8 HEAD)"
+        echo "Base branch: $BASE_BRANCH"
+        echo "Base commit: $BASE_COMMIT"
+        echo "Commit count: $COMMITS_COUNT"
         echo "KSU Version: $KSU_VERSION"
         echo "KSU Git Tag: $KSU_GIT_TAG"
         echo "KSU Manager: $KSU_MANAGER"
