@@ -1,0 +1,91 @@
+name: 'Setup VPNHide Next'
+description: 'Integrate the latest VPNHide Next in-tree kernel driver'
+
+inputs:
+  version:
+    description: 'Kernel version profile'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download VPNHide Next
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+
+        VPNHIDE_SRC="${{ github.workspace }}/vpnhide-next"
+
+        rm -rf "$VPNHIDE_SRC"
+
+        git clone \
+          --depth 1 \
+          --single-branch \
+          --branch main \
+          https://github.com/soranerai/vpnhide_next_backend.git \
+          "$VPNHIDE_SRC"
+
+        VPNHIDE_SHA="$(git -C "$VPNHIDE_SRC" rev-parse HEAD)"
+
+        echo "VPNHide Next SHA: $VPNHIDE_SHA"
+        echo "VPNHIDE_SHA=$VPNHIDE_SHA" >> "$GITHUB_ENV"
+
+    - name: Apply VPNHide Next Kernel Integration
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
+
+        VPNHIDE_SRC="${{ github.workspace }}/vpnhide-next"
+        APPLY_SCRIPT="$VPNHIDE_SRC/kpatch/scripts/apply.sh"
+
+        test -f "$APPLY_SCRIPT"
+
+        bash "$APPLY_SCRIPT" \
+          "${{ github.workspace }}/kernel/common" \
+          "${{ inputs.version }}"
+
+        KCONFIG="security/vpnhide/Kconfig"
+
+        test -f "$KCONFIG"
+
+        # Upstream currently has several help lines indented with one tab and
+        # two spaces. Kconfig treats them as statements instead of help text.
+        sed -i $'s/^\t  /\t\t/' "$KCONFIG"
+
+    - name: Verify VPNHide Next Integration
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
+
+        KCONFIG="security/vpnhide/Kconfig"
+
+        test -f security/vpnhide/core.c
+        test -f "$KCONFIG"
+        test -f security/vpnhide/Makefile
+        test -f include/linux/vpnhide.h
+
+        grep -q '^config VPNHIDE$' "$KCONFIG"
+        grep -q 'security/vpnhide/Kconfig' security/Kconfig
+        grep -q 'CONFIG_VPNHIDE.*vpnhide/' security/Makefile
+
+        if grep -n $'^\t  ' "$KCONFIG"; then
+          echo "::error::Invalid VPNHide Kconfig help indentation"
+          exit 1
+        fi
+
+        REJECT="$(find . -type f -name '*.rej' -print -quit)"
+        if [ -n "$REJECT" ]; then
+          echo "::error::VPNHide patch reject found: $REJECT"
+          exit 1
+        fi
+
+        echo "VPNHide Next integrated successfully: ${VPNHIDE_SHA:0:7}"
+
+    - name: Enable VPNHide Config
+      uses: ./.github/actions/set-kernel-config
+      with:
+        config_list: |
+          CONFIG_VPNHIDE=y
