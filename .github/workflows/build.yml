@@ -457,56 +457,129 @@ jobs:
       shell: bash
       run: |
         SUMMARY_FILE="/tmp/build-summary-${{ steps.extract.outputs.file_name }}.md"
+        ACTUAL_SUBLEVEL="${{ steps.extract.outputs.sublevel }}"
+
+        if [ -z "$ACTUAL_SUBLEVEL" ]; then
+          ACTUAL_SUBLEVEL="${{ inputs.sublevel }}"
+        fi
         
         # Determine build status
         if [ "${{ job.status }}" = "success" ]; then
           STATUS="✅ Success"
+          PATCH_STATUS="applied successfully"
         else
           STATUS="❌ Failed"
+          PATCH_STATUS="configured; inspect the failed step"
         fi
         
         # Get kernel version from Image if available
         KERNEL_VER_STR=""
-        if [ -f "/home/runner/out/dist/Image" ]; then
-          KERNEL_VER_STR=$(strings "/home/runner/out/dist/Image" | grep -m1 "^Linux version " | sed 's/Linux version //' || echo "")
-        elif [ -f "/home/runner/out/Image" ]; then
-          KERNEL_VER_STR=$(strings "/home/runner/out/Image" | grep -m1 "^Linux version " | sed 's/Linux version //' || echo "")
-        fi
+        for IMAGE_PATH in \
+          "${{ github.workspace }}/kernel/common/bazel-bin/common/kernel_aarch64/Image" \
+          "/home/runner/out/dist/Image" \
+          "/home/runner/out/Image" \
+          "${{ github.workspace }}/AnyKernel3/Image"; do
+          if [ -f "$IMAGE_PATH" ]; then
+            KERNEL_VER_STR="$(strings "$IMAGE_PATH" | grep -m1 '^Linux version ' | sed 's/Linux version //' || true)"
+            [ -n "$KERNEL_VER_STR" ] && break
+          fi
+        done
         
-        # Get KSU version from env (set by kernelsu action)
+        # Runtime metadata exported by the integration actions.
         KSU_VER="${KSU_VERSION:-N/A}"
         KSU_TAG="${KSU_GIT_TAG:-N/A}"
+        KSU_REF="${KSU_SOURCE_REF:-N/A}"
+        KSU_SHA="${KSU_COMMIT:-N/A}"
+        SUSFS_REF="${SUSFS_BRANCH:-N/A}"
+        SUSFS_SHA_VALUE="${SUSFS_SHA:-}"
+        NOMOUNT_SHA_VALUE="${NOMOUNT_SHA:-}"
+
+        if [ -n "$SUSFS_SHA_VALUE" ]; then
+          SUSFS_SHORT_SHA="${SUSFS_SHA_VALUE:0:7}"
+        else
+          SUSFS_SHORT_SHA="N/A"
+        fi
+
+        if [ -n "$NOMOUNT_SHA_VALUE" ]; then
+          NOMOUNT_SHORT_SHA="${NOMOUNT_SHA_VALUE:0:7}"
+        else
+          NOMOUNT_SHORT_SHA="N/A"
+        fi
         
         # Get SUSFS version from susfs.h if available
         SUSFS_VER="N/A"
         if [ -f "${{ github.workspace }}/kernel/common/include/linux/susfs.h" ]; then
-          SUSFS_VER=$(grep '#define SUSFS_VERSION' "${{ github.workspace }}/kernel/common/include/linux/susfs.h" | awk -F'"' '{print $2}' || echo "N/A")
+          SUSFS_VER="$(grep '#define SUSFS_VERSION' "${{ github.workspace }}/kernel/common/include/linux/susfs.h" | awk -F'"' '{print $2}' || true)"
+          [ -n "$SUSFS_VER" ] || SUSFS_VER="N/A"
         fi
-        
-        # Get cache stats from env (set by cache-stats action)
-        CCACHE_HIT="${CCACHE_HIT_RATE:-N/A}"
-        
-        # Get build time (approximate from step timing)
-        BUILD_TIME="N/A"
-        
-        # Count warnings from build log if available
-        WARNINGS="N/A"
+
+        FEATURE_SET="${{ inputs.feature_set }}"
         
         {
-          echo "## ${{ inputs.android_version }} ${{ inputs.kernel_version }}.${{ inputs.sublevel }} (${{ inputs.variant }}) — ${STATUS}"
+          echo "## ${{ inputs.android_version }} ${{ inputs.kernel_version }}.${ACTUAL_SUBLEVEL} (${{ inputs.variant }}) — ${STATUS}"
           echo
           echo "| Metric | Value |"
           echo "|--------|-------|"
           echo "| **Status** | ${STATUS} |"
-          echo "| **Kernel** | ${{ inputs.kernel_version }}.${{ inputs.sublevel }}-${{ inputs.android_version }}-${{ inputs.os_patch_level }} |"
+          echo "| **Kernel** | ${{ inputs.kernel_version }}.${ACTUAL_SUBLEVEL}-${{ inputs.android_version }}-${{ inputs.os_patch_level }} |"
           if [ -n "$KERNEL_VER_STR" ]; then
             echo "| **Version String** | \`${KERNEL_VER_STR}\` |"
           fi
           echo "| **KSU Version** | ${KSU_VER} |"
+          echo "| **KSU Ref** | \`${KSU_REF}\` |"
+          echo "| **KSU Commit** | \`${KSU_SHA}\` |"
           echo "| **KSU Tag** | ${KSU_TAG} |"
           echo "| **SUSFS Version** | ${SUSFS_VER} |"
-          echo "| **Feature Set** | ${{ inputs.feature_set }} |"
+          echo "| **SUSFS Ref** | \`${SUSFS_REF}\` |"
+          echo "| **SUSFS Commit** | \`${SUSFS_SHORT_SHA}\` |"
+          echo "| **NoMount Commit** | \`${NOMOUNT_SHORT_SHA}\` |"
+          echo "| **AnyKernel3** | \`${AK3_ARTIFACT_NAME:-N/A}\` |"
+          echo "| **Feature Set** | ${FEATURE_SET} |"
           echo "| **Variant** | ${{ inputs.variant }} |"
+          echo
+
+          echo "### Applied Integrations"
+          echo
+          echo "| Component | Runtime version/source | Status |"
+          echo "|-----------|------------------------|--------|"
+          echo "| KernelSU Next | ${KSU_VER}, \`${KSU_REF}\` @ \`${KSU_SHA}\` | $([ "$KSU_VER" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
+          echo "| SUSFS | ${SUSFS_VER}, \`${SUSFS_REF}\` @ \`${SUSFS_SHORT_SHA}\` | $([ "$SUSFS_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
+          echo "| NoMount dev | \`${NOMOUNT_SHORT_SHA}\` | $([ "$NOMOUNT_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
+          echo
+
+          echo "### Patch Stages"
+          echo
+          echo "- Kernel compatibility fixes: ${PATCH_STATUS}"
+          if [ "$KSU_VER" != "N/A" ]; then
+            echo "- KernelSU Next static integration patch: ${PATCH_STATUS}"
+          fi
+          if [ "$SUSFS_SHORT_SHA" != "N/A" ]; then
+            echo "- SUSFS GKI integration and Toolkit coexistence patches: ${PATCH_STATUS}"
+          fi
+          if [ "$NOMOUNT_SHORT_SHA" != "N/A" ]; then
+            echo "- NoMount fs/Kconfig/Makefile integration: ${PATCH_STATUS}"
+          fi
+          case "$FEATURE_SET" in
+            FULL|*BBG*) echo "- Baseband Guard patches: ${PATCH_STATUS}" ;;
+          esac
+          case "$FEATURE_SET" in
+            FULL|*NET*) echo "- Networking and BBRv3 patches: ${PATCH_STATUS}" ;;
+          esac
+          case "$FEATURE_SET" in
+            FULL|*DS*) echo "- DroidSpaces patches: ${PATCH_STATUS}" ;;
+          esac
+          echo "- NTSync compatibility patches: ${PATCH_STATUS}"
+          echo "- Ptrace compatibility patch: ${PATCH_STATUS}"
+          echo "- Unicode compatibility fix: ${PATCH_STATUS}"
+          if [ "${{ inputs.version }}" = "android14-6.1" ]; then
+            echo "- Android 14 / 6.1 performance patches: ${PATCH_STATUS}"
+            echo "- 300 Hz timer configuration: ${PATCH_STATUS}"
+          fi
+          echo "- Miscellaneous kernel configs: ${PATCH_STATUS}"
+          echo "- Device-specific patches: ${PATCH_STATUS}"
+          echo "- Kernel branding: ${PATCH_STATUS}"
+          echo "- Protected export cleanup: ${PATCH_STATUS}"
+          echo "- Kernel flag cleanup: ${PATCH_STATUS}"
           echo
           
           # Kernel Fixes

@@ -44,23 +44,37 @@ runs:
         KSU_GIT_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1")"
         sed -i "s/^KSU_VERSION_TAG_FALLBACK := v0.0.1$/KSU_VERSION_TAG_FALLBACK := ${KSU_GIT_TAG}/" Kbuild
     
-    - name: Extract KSU Version Info
+    - name: Extract Built KSU Version Info
       id: ksu-version
       shell: bash
-      working-directory: ${{ github.workspace }}/kernel/KernelSU-Next
+      working-directory: ${{ github.workspace }}/kernel/KernelSU-Next/kernel
       run: |
-        # Fetch dev branch for version info (tags, commits, etc.)
-        git fetch --depth=50 origin dev 2>/dev/null || true
-        
-        # Extract and export KSU version info from dev branch
-        KSU_GIT_VERSION=$(git rev-list --count origin/dev 2>/dev/null)
-        KSU_GIT_TAG=$(git describe --tags --abbrev=0 origin/dev 2>/dev/null || echo "")
-        KSU_COMMIT=$(git rev-parse --short origin/dev 2>/dev/null)
-        KSU_VERSION=$((30000 + KSU_GIT_VERSION))
-        
-        echo "KSU_GIT_TAG=$KSU_GIT_TAG" >> $GITHUB_ENV
-        echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_ENV
-        echo "KSU_COMMIT=$KSU_COMMIT" >> $GITHUB_ENV
+        set -euo pipefail
+
+        KSU_SOURCE_REF="${{ inputs.ksu_branch }}"
+        if [ -z "$KSU_SOURCE_REF" ]; then
+          KSU_SOURCE_REF="dev-susfs"
+        fi
+
+        # Read the exact values written to the Kbuild used by this build.
+        KSU_VERSION="$(sed -n 's/^KSU_VERSION_FALLBACK := //p' Kbuild | head -n 1)"
+        KSU_GIT_TAG="$(sed -n 's/^KSU_VERSION_TAG_FALLBACK := //p' Kbuild | head -n 1)"
+        KSU_COMMIT="$(git rev-parse --short=7 HEAD)"
+
+        if [[ ! "$KSU_VERSION" =~ ^[0-9]+$ ]]; then
+          echo "::error::Invalid built KernelSU Next version: $KSU_VERSION"
+          exit 1
+        fi
+
+        echo "Built KernelSU Next ref: $KSU_SOURCE_REF"
+        echo "Built KernelSU Next commit: $KSU_COMMIT"
+        echo "Built KernelSU Next version: $KSU_VERSION"
+        echo "Built KernelSU Next tag: $KSU_GIT_TAG"
+
+        echo "KSU_SOURCE_REF=$KSU_SOURCE_REF" >> "$GITHUB_ENV"
+        echo "KSU_GIT_TAG=$KSU_GIT_TAG" >> "$GITHUB_ENV"
+        echo "KSU_VERSION=$KSU_VERSION" >> "$GITHUB_ENV"
+        echo "KSU_COMMIT=$KSU_COMMIT" >> "$GITHUB_ENV"
 
     - name: 'Fix KernelSU-Next'
       shell: bash
