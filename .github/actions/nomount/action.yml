@@ -1,17 +1,15 @@
 name: 'Setup Maxsteel NoMount'
-
-description: 'Integrate maxsteeel NoMount dev'
+description: 'Integrate latest maxsteeel NoMount dev'
 
 runs:
   using: composite
   steps:
-    - name: Integrate Maxsteel NoMount
+
+    - name: Download Maxsteel NoMount
       shell: bash
       working-directory: ${{ github.workspace }}/kernel/common
       run: |
         set -euo pipefail
-
-        echo "=== Clone maxsteeel NoMount dev ==="
 
         NM_SRC="${{ github.workspace }}/nomount-maxsteel"
 
@@ -24,23 +22,43 @@ runs:
           https://github.com/maxsteeel/nomount.git \
           "$NM_SRC"
 
-        echo "=== Install NoMount source ==="
+        NM_SHA="$(git -C "$NM_SRC" rev-parse HEAD)"
+
+        echo "NoMount dev SHA: $NM_SHA"
+        echo "NOMOUNT_SHA=$NM_SHA" >> "$GITHUB_ENV"
+
+    - name: Install NoMount Source
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
 
         mkdir -p fs/nomount
 
-        cp -f "$NM_SRC/kernel/src/"* fs/nomount/
+        cp -f "${{ github.workspace }}/nomount-maxsteel/kernel/src/"* fs/nomount/
 
-        echo "=== Apply Linux 6.1 integration patch ==="
+        grep -qF 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile || \
+          echo 'obj-$(CONFIG_NOMOUNT) += nomount/' >> fs/Makefile
 
-        patch -p1 --forward --fuzz=1 < \
-          "$NM_SRC/kernel/patches/nomount_6.1_kernel_integration.patch"
+        grep -q 'source "fs/nomount/Kconfig"' fs/Kconfig || \
+          echo 'source "fs/nomount/Kconfig"' >> fs/Kconfig
 
-        echo "=== Verify NoMount ==="
+    - name: Verify NoMount
+      shell: bash
+      working-directory: ${{ github.workspace }}/kernel/common
+      run: |
+        set -euo pipefail
 
         test -f fs/nomount/nomount.c
         test -f fs/nomount/nomount.h
+        test -f fs/nomount/Kconfig
+        test -f fs/nomount/Makefile
 
-        grep -q 'obj-.*CONFIG_NOMOUNT.*nomount/' fs/Makefile
+        grep -qF 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile
         grep -q 'source "fs/nomount/Kconfig"' fs/Kconfig
 
-        echo "=== Maxsteel NoMount integrated ==="
+    - name: Enable Kernel Config
+      uses: ./.github/actions/set-kernel-config
+      with:
+        config_list: |
+          CONFIG_NOMOUNT=y
