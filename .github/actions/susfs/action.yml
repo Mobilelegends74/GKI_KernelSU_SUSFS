@@ -29,24 +29,36 @@ runs:
       run: |
         set -euo pipefail
 
+        SUSFS_REPO="https://gitlab.com/simonpunk/susfs4ksu"
         SUSFS_BRANCH="gki-${{ inputs.version }}"
+        SUSFS_ARCHIVE_REF="${{ inputs.susfs_commit }}"
+
+        if [ -z "$SUSFS_ARCHIVE_REF" ]; then
+          SUSFS_ARCHIVE_REF="$SUSFS_BRANCH"
+          SUSFS_SHA="$(git ls-remote "${SUSFS_REPO}.git" "refs/heads/$SUSFS_BRANCH" | awk 'NR == 1 { print $1 }')"
+        else
+          SUSFS_SHA="$SUSFS_ARCHIVE_REF"
+        fi
+
+        if [[ ! "$SUSFS_SHA" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+          echo "::error::Unable to resolve SUSFS ref: $SUSFS_ARCHIVE_REF"
+          exit 1
+        fi
 
         echo "Preparing SUSFS for branch: $SUSFS_BRANCH"
-        echo "Downloading SUSFS archive from $SUSFS_BRANCH..."
+        echo "Downloading SUSFS archive ref: $SUSFS_ARCHIVE_REF"
+        echo "SUSFS source SHA: $SUSFS_SHA"
 
-        curl -L \
-          "https://gitlab.com/simonpunk/susfs4ksu/-/archive/${SUSFS_BRANCH}/susfs4ksu-${SUSFS_BRANCH}.tar.gz" \
+        echo "SUSFS_BRANCH=$SUSFS_BRANCH" >> "$GITHUB_ENV"
+        echo "SUSFS_SHA=$SUSFS_SHA" >> "$GITHUB_ENV"
+
+        curl -fL \
+          "${SUSFS_REPO}/-/archive/${SUSFS_ARCHIVE_REF}/susfs4ksu-${SUSFS_ARCHIVE_REF}.tar.gz" \
           -o susfs.tar.gz
 
         tar -xzf susfs.tar.gz
 
-        mv "susfs4ksu-${SUSFS_BRANCH}" susfs4ksu
-
-        if [ -n "${{ inputs.susfs_commit }}" ]; then
-          echo "Checking out SUSFS commit: ${{ inputs.susfs_commit }}"
-          cd ${{ github.workspace }}/susfs4ksu
-          git checkout "${{ inputs.susfs_commit }}"
-        fi
+        mv "susfs4ksu-${SUSFS_ARCHIVE_REF}" susfs4ksu
 
         cd susfs4ksu
         

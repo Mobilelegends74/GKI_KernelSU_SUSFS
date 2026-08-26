@@ -12,7 +12,7 @@ on:
         required: false
         type: string
       ksu_branch:
-        description: "KernelSU branch or commit (empty = latest dev)"
+        description: "KernelSU branch or commit (empty = latest dev-susfs)"
         required: false
         type: string
         default: ""
