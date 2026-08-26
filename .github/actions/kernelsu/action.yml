@@ -20,7 +20,7 @@ runs:
         if [ -z "$KSU_INPUT" ]; then
           KSU_INPUT="dev-susfs"
         fi
-        KSU_VERSION_REF="$KSU_INPUT"
+        KSU_SOURCE_REF="$KSU_INPUT"
 
         # Try as branch first, fall back to commit
         if git ls-remote --heads "$KSU_REPO" "$KSU_INPUT" | grep -q .; then
@@ -32,78 +32,96 @@ runs:
             "refs/remotes/origin/${KSU_INPUT}"
         else
           echo "Using KernelSU-Next commit: $KSU_INPUT"
-          KSU_VERSION_REF="dev-susfs"
+          KSU_SOURCE_REF="dev-susfs"
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           git -C KernelSU-Next/kernel fetch --no-tags origin "$KSU_INPUT"
-          git -C KernelSU-Next/kernel checkout "$KSU_INPUT"
+          # Keep the selected commit on the known source branch name so the
+          # upstream Kbuild resolves dev-susfs -> dev to the same base ref.
+          git -C KernelSU-Next/kernel checkout -B "$KSU_SOURCE_REF" "$KSU_INPUT"
         fi
 
-        cd KernelSU-Next/kernel
+        KSU_SOURCE_TREE="${PWD}/KernelSU-Next/kernel"
+        KSU_GIT_ROOT="$(git -C "$KSU_SOURCE_TREE" rev-parse --show-toplevel)"
+        KSU_KBUILD="${KSU_SOURCE_TREE}/Kbuild"
 
-        # Kbuild derives the version from the common history with the base
-        # branch (dev-susfs -> dev). A shallow HEAD count is not equivalent.
-        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-          git fetch --unshallow --no-tags origin
+        if [ ! -f "$KSU_KBUILD" ]; then
+          echo "::error::KernelSU Next Kbuild was not found at $KSU_KBUILD"
+          exit 1
         fi
 
-        BASE_BRANCH="$(git rev-parse --abbrev-ref HEAD | sed 's:-.*::')"
-        if [ "$BASE_BRANCH" = "HEAD" ]; then
-          BASE_BRANCH="$(printf '%s\n' "$KSU_VERSION_REF" | sed 's:-.*::')"
+        # The selected source ref is authoritative. Match upstream Kbuild's
+        # dev-susfs -> dev mapping without deriving it from the checkout state.
+        BASE_BRANCH="$(printf '%s\n' "$KSU_SOURCE_REF" | sed 's:-.*::')"
+        if [ -z "$BASE_BRANCH" ]; then
+          echo "::error::Unable to derive the KernelSU Next base branch from $KSU_SOURCE_REF"
+          exit 1
         fi
-        git fetch --no-tags origin \
-          "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
-        BASE_COMMIT="$(git merge-base HEAD "refs/remotes/origin/${BASE_BRANCH}")"
-        COMMITS_COUNT="$(git rev-list --count "$BASE_COMMIT")"
+
+        SOURCE_REMOTE_REF="refs/remotes/origin/${KSU_SOURCE_REF}"
+        BASE_REMOTE_REF="refs/remotes/origin/${BASE_BRANCH}"
+        FETCH_REFS=(
+          "+refs/heads/${KSU_SOURCE_REF}:${SOURCE_REMOTE_REF}"
+          "+refs/heads/${BASE_BRANCH}:${BASE_REMOTE_REF}"
+        )
+
+        if [ "$(git -C "$KSU_GIT_ROOT" rev-parse --is-shallow-repository)" = "true" ]; then
+          git -C "$KSU_GIT_ROOT" fetch --unshallow --no-tags origin "${FETCH_REFS[@]}"
+        else
+          git -C "$KSU_GIT_ROOT" fetch --no-tags origin "${FETCH_REFS[@]}"
+        fi
+
+        GIT_SHALLOW="$(git -C "$KSU_GIT_ROOT" rev-parse --is-shallow-repository)"
+        if [ "$GIT_SHALLOW" != "false" ]; then
+          echo "::error::KernelSU Next repository is still shallow after fetching full history"
+          exit 1
+        fi
+        if ! git -C "$KSU_GIT_ROOT" show-ref --verify --quiet "$SOURCE_REMOTE_REF"; then
+          echo "::error::Missing exact KernelSU Next source ref: $SOURCE_REMOTE_REF"
+          exit 1
+        fi
+        if ! git -C "$KSU_GIT_ROOT" show-ref --verify --quiet "$BASE_REMOTE_REF"; then
+          echo "::error::Missing exact KernelSU Next base ref: $BASE_REMOTE_REF"
+          exit 1
+        fi
+
+        KSU_COMMIT_FULL="$(git -C "$KSU_GIT_ROOT" rev-parse 'HEAD^{commit}')"
+        KSU_COMMIT_SHORT="${KSU_COMMIT_FULL:0:7}"
+        if ! BASE_COMMIT="$(git -C "$KSU_GIT_ROOT" merge-base "$KSU_COMMIT_FULL" "$BASE_REMOTE_REF")" || [ -z "$BASE_COMMIT" ]; then
+          echo "::error::Unable to find merge-base between $KSU_COMMIT_FULL and $BASE_REMOTE_REF"
+          exit 1
+        fi
+        COMMITS_COUNT="$(git -C "$KSU_GIT_ROOT" rev-list --count "$BASE_COMMIT")"
+        if [[ ! "$COMMITS_COUNT" =~ ^[0-9]+$ ]] || [ "$COMMITS_COUNT" -eq 0 ]; then
+          echo "::error::Invalid KernelSU Next base commit count: $COMMITS_COUNT"
+          exit 1
+        fi
         KSU_VERSION=$((30000 + COMMITS_COUNT))
         sed -i -E \
           "s/^KSU_VERSION_FALLBACK := [0-9]+$/KSU_VERSION_FALLBACK := ${KSU_VERSION}/" \
-          Kbuild
-        if ! grep -qx "KSU_VERSION_FALLBACK := ${KSU_VERSION}" Kbuild; then
+          "$KSU_KBUILD"
+        if ! grep -qx "KSU_VERSION_FALLBACK := ${KSU_VERSION}" "$KSU_KBUILD"; then
           echo "::error::Failed to store calculated KernelSU Next version in Kbuild"
           exit 1
         fi
 
-        echo "KernelSU Next ref: $KSU_VERSION_REF"
-        echo "KernelSU Next commit: $(git rev-parse --short=8 HEAD)"
-        echo "KernelSU Next base branch: $BASE_BRANCH"
-        echo "KernelSU Next base commit: $BASE_COMMIT"
-        echo "KernelSU Next base commit count: $COMMITS_COUNT"
-        echo "KernelSU Next calculated version: $KSU_VERSION"
+        KSU_GIT_TAG="$(git -C "$KSU_GIT_ROOT" describe --tags --abbrev=0 "$BASE_COMMIT" 2>/dev/null || echo "v0.0.1")"
+        sed -i "s/^KSU_VERSION_TAG_FALLBACK := v0.0.1$/KSU_VERSION_TAG_FALLBACK := ${KSU_GIT_TAG}/" "$KSU_KBUILD"
 
-        KSU_GIT_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1")"
-        sed -i "s/^KSU_VERSION_TAG_FALLBACK := v0.0.1$/KSU_VERSION_TAG_FALLBACK := ${KSU_GIT_TAG}/" Kbuild
-    
-    - name: Extract Built KSU Version Info
-      id: ksu-version
-      shell: bash
-      working-directory: ${{ github.workspace }}/kernel/KernelSU-Next/kernel
-      run: |
-        set -euo pipefail
+        {
+          echo "KSU_SOURCE_REF=$KSU_SOURCE_REF"
+          echo "KSU_GIT_TAG=$KSU_GIT_TAG"
+          echo "KSU_VERSION=$KSU_VERSION"
+          echo "KSU_COMMIT=$KSU_COMMIT_SHORT"
+          echo "KSUN_COMMIT=$KSU_COMMIT_FULL"
+          echo "KSU_BASE_BRANCH=$BASE_BRANCH"
+          echo "KSU_BASE_COMMIT=$BASE_COMMIT"
+          echo "KSU_COMMITS_COUNT=$COMMITS_COUNT"
+          echo "KSU_GIT_SHALLOW=$GIT_SHALLOW"
+        } > "${GITHUB_WORKSPACE}/ksu-build-metadata.env"
+        cat "${GITHUB_WORKSPACE}/ksu-build-metadata.env" >> "$GITHUB_ENV"
+        echo "KSU_GIT_ROOT=$KSU_GIT_ROOT" >> "$GITHUB_ENV"
 
-        KSU_SOURCE_REF="${{ inputs.ksu_branch }}"
-        if [ -z "$KSU_SOURCE_REF" ]; then
-          KSU_SOURCE_REF="dev-susfs"
-        fi
-
-        # Read the exact values written to the Kbuild used by this build.
-        KSU_VERSION="$(sed -n 's/^KSU_VERSION_FALLBACK := //p' Kbuild | head -n 1)"
-        KSU_GIT_TAG="$(sed -n 's/^KSU_VERSION_TAG_FALLBACK := //p' Kbuild | head -n 1)"
-        KSU_COMMIT="$(git rev-parse --short=7 HEAD)"
-
-        if [[ ! "$KSU_VERSION" =~ ^[0-9]+$ ]]; then
-          echo "::error::Invalid built KernelSU Next version: $KSU_VERSION"
-          exit 1
-        fi
-
-        echo "Built KernelSU Next ref: $KSU_SOURCE_REF"
-        echo "Built KernelSU Next commit: $KSU_COMMIT"
-        echo "Built KernelSU Next version: $KSU_VERSION"
-        echo "Built KernelSU Next tag: $KSU_GIT_TAG"
-
-        echo "KSU_SOURCE_REF=$KSU_SOURCE_REF" >> "$GITHUB_ENV"
-        echo "KSU_GIT_TAG=$KSU_GIT_TAG" >> "$GITHUB_ENV"
-        echo "KSU_VERSION=$KSU_VERSION" >> "$GITHUB_ENV"
-        echo "KSU_COMMIT=$KSU_COMMIT" >> "$GITHUB_ENV"
+        echo "KernelSU Next version metadata resolved from $KSU_GIT_ROOT"
 
     - name: 'Fix KernelSU-Next'
       shell: bash
