@@ -407,6 +407,46 @@ jobs:
     - name: Initialize Config Fragment
       run: touch "${{ github.workspace }}/wild_gki.fragment"
 
+    - name: Upload KernelSU Version Metadata
+      if: contains(inputs.feature_set, 'KSUN') || inputs.feature_set == 'FULL'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.extract.outputs.file_name }}-KSU-Metadata
+        path: ${{ github.workspace }}/ksu-build-metadata.env
+        if-no-files-found: error
+        compression-level: 9
+
+    - name: Verify KernelSU Version Resolution
+      if: contains(inputs.feature_set, 'KSUN') || inputs.feature_set == 'FULL'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CURRENT_SHALLOW="$(git -C "$KSU_GIT_ROOT" rev-parse --is-shallow-repository)"
+        CURRENT_COMMIT="$(git -C "$KSU_GIT_ROOT" rev-parse 'HEAD^{commit}')"
+        if [ "$CURRENT_SHALLOW" != "false" ]; then
+          echo "::error::KernelSU Next repository became shallow before the kernel build"
+          exit 1
+        fi
+        if [ "$CURRENT_COMMIT" != "$KSUN_COMMIT" ]; then
+          echo "::error::KernelSU Next checkout changed after version resolution"
+          exit 1
+        fi
+        if [[ ! "$KSU_VERSION" =~ ^[0-9]+$ ]] || [[ ! "$KSU_COMMITS_COUNT" =~ ^[0-9]+$ ]]; then
+          echo "::error::Invalid authoritative KernelSU Next version metadata"
+          exit 1
+        fi
+
+        echo "=== KernelSU Version Resolution ==="
+        echo "KSU Ref: $KSU_SOURCE_REF"
+        echo "KSU Commit: $KSUN_COMMIT"
+        echo "Git shallow: $CURRENT_SHALLOW"
+        echo "Base branch: $KSU_BASE_BRANCH"
+        echo "Base commit: $KSU_BASE_COMMIT"
+        echo "Base commit count: $KSU_COMMITS_COUNT"
+        echo "Calculated KSU_VERSION: $KSU_VERSION"
+        echo "==================================="
+
     - name: Build Normal Kernel
       env:
         SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}

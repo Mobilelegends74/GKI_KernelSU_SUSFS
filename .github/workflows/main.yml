@@ -479,76 +479,97 @@ jobs:
 
         echo "release_title=$release_title" >> "$GITHUB_OUTPUT"
 
-    - name: Extract KernelSU Version Info
-      id: ksu_version
+    - name: Download KernelSU Build Metadata
+      if: contains(inputs.feature_set, 'KSUN') || inputs.feature_set == 'FULL'
+      uses: actions/download-artifact@v7
+      with:
+        path: ksu-metadata
+        pattern: '*-KSU-Metadata'
+        merge-multiple: false
+
+    - name: Load KernelSU Build Metadata
+      if: contains(inputs.feature_set, 'KSUN') || inputs.feature_set == 'FULL'
       run: |
         set -euo pipefail
 
-        KSU_REPO="https://github.com/pershoot/KernelSU-Next.git"
-        KSU_INPUT="${{ inputs.ksu_branch }}"
-        if [ -z "$KSU_INPUT" ]; then
-          KSU_INPUT="dev-susfs"
-        fi
-        KSU_VERSION_REF="$KSU_INPUT"
-
-        # Try as branch first, fall back to commit
-        if git ls-remote --heads "$KSU_REPO" "$KSU_INPUT" | grep -q .; then
-          echo "Cloning KernelSU-Next from branch: $KSU_INPUT"
-          git clone --branch "$KSU_INPUT" "$KSU_REPO" /tmp/kernelsu-next
-          cd /tmp/kernelsu-next
-        else
-          echo "Cloning KernelSU-Next from dev-susfs branch, then checking out commit: $KSU_INPUT"
-          KSU_VERSION_REF="dev-susfs"
-          git clone --branch dev-susfs "$KSU_REPO" /tmp/kernelsu-next
-          cd /tmp/kernelsu-next
-          git fetch --no-tags origin "$KSU_INPUT"
-          git checkout "$KSU_INPUT"
+        mapfile -t METADATA_FILES < <(find ksu-metadata -type f -name 'ksu-build-metadata.env' -print | sort)
+        if [ "${#METADATA_FILES[@]}" -eq 0 ]; then
+          echo "::error::No KernelSU build metadata artifacts were found"
+          exit 1
         fi
 
-        KSUN_COMMIT="$(git rev-parse HEAD)"
+        metadata_value() {
+          local key="$1"
+          local file="$2"
+          local count
+          count="$(grep -c "^${key}=" "$file" || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one ${key} entry in ${file}" >&2
+            return 1
+          fi
+          sed -n "s/^${key}=//p" "$file"
+        }
 
-        # Match KernelSU-Next/kernel/Kbuild: count the base branch history,
-        # not the number of commits retained by a shallow checkout.
-        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-          git fetch --unshallow --no-tags origin
+        FIRST_METADATA="${METADATA_FILES[0]}"
+        KSU_SOURCE_REF="$(metadata_value KSU_SOURCE_REF "$FIRST_METADATA")"
+        KSU_GIT_TAG="$(metadata_value KSU_GIT_TAG "$FIRST_METADATA")"
+        KSU_VERSION="$(metadata_value KSU_VERSION "$FIRST_METADATA")"
+        KSU_COMMIT="$(metadata_value KSU_COMMIT "$FIRST_METADATA")"
+        KSUN_COMMIT="$(metadata_value KSUN_COMMIT "$FIRST_METADATA")"
+        KSU_BASE_BRANCH="$(metadata_value KSU_BASE_BRANCH "$FIRST_METADATA")"
+        KSU_BASE_COMMIT="$(metadata_value KSU_BASE_COMMIT "$FIRST_METADATA")"
+        KSU_COMMITS_COUNT="$(metadata_value KSU_COMMITS_COUNT "$FIRST_METADATA")"
+        KSU_GIT_SHALLOW="$(metadata_value KSU_GIT_SHALLOW "$FIRST_METADATA")"
+
+        if [[ ! "$KSU_VERSION" =~ ^[0-9]+$ ]] || [[ ! "$KSU_COMMITS_COUNT" =~ ^[0-9]+$ ]]; then
+          echo "::error::Invalid KernelSU version metadata"
+          exit 1
+        fi
+        if [[ ! "$KSUN_COMMIT" =~ ^[0-9a-f]{40}$ ]] || [ "$KSU_COMMIT" != "${KSUN_COMMIT:0:7}" ]; then
+          echo "::error::Invalid KernelSU commit metadata"
+          exit 1
+        fi
+        if [[ ! "$KSU_BASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || [ "$KSU_GIT_SHALLOW" != "false" ]; then
+          echo "::error::KernelSU metadata was not resolved from a full Git history"
+          exit 1
+        fi
+        if [ "$KSU_VERSION" -ne $((30000 + KSU_COMMITS_COUNT)) ]; then
+          echo "::error::KernelSU version and base commit count metadata disagree"
+          exit 1
         fi
 
-        BASE_BRANCH="$(git rev-parse --abbrev-ref HEAD | sed 's:-.*::')"
-        if [ "$BASE_BRANCH" = "HEAD" ]; then
-          BASE_BRANCH="$(printf '%s\n' "$KSU_VERSION_REF" | sed 's:-.*::')"
-        fi
-        git fetch --no-tags origin \
-          "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
-        BASE_COMMIT="$(git merge-base HEAD "refs/remotes/origin/${BASE_BRANCH}")"
-        COMMITS_COUNT="$(git rev-list --count "$BASE_COMMIT")"
-        KSU_VERSION=$((30000 + COMMITS_COUNT))
+        EXPECTED_METADATA="${KSU_SOURCE_REF}|${KSU_GIT_TAG}|${KSU_VERSION}|${KSU_COMMIT}|${KSUN_COMMIT}|${KSU_BASE_BRANCH}|${KSU_BASE_COMMIT}|${KSU_COMMITS_COUNT}|${KSU_GIT_SHALLOW}"
+        for metadata_file in "${METADATA_FILES[@]:1}"; do
+          CURRENT_METADATA="$(metadata_value KSU_SOURCE_REF "$metadata_file")|$(metadata_value KSU_GIT_TAG "$metadata_file")|$(metadata_value KSU_VERSION "$metadata_file")|$(metadata_value KSU_COMMIT "$metadata_file")|$(metadata_value KSUN_COMMIT "$metadata_file")|$(metadata_value KSU_BASE_BRANCH "$metadata_file")|$(metadata_value KSU_BASE_COMMIT "$metadata_file")|$(metadata_value KSU_COMMITS_COUNT "$metadata_file")|$(metadata_value KSU_GIT_SHALLOW "$metadata_file")"
+          if [ "$CURRENT_METADATA" != "$EXPECTED_METADATA" ]; then
+            echo "::error::KernelSU metadata differs between build artifacts"
+            exit 1
+          fi
+        done
 
-        # Extract git tag
-        KSU_GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "no-tag")
-
-        MANAGER_RUN_ID=$(curl -fsSL "https://api.github.com/repos/pershoot/KernelSU-Next/actions/workflows/build-manager-ci.yml/runs?head_sha=${KSUN_COMMIT}" | jq -r '.workflow_runs[0].id // empty')
+        MANAGER_RUN_ID=$(curl -fsSL "https://api.github.com/repos/pershoot/KernelSU-Next/actions/workflows/build-manager-ci.yml/runs?head_sha=${KSUN_COMMIT}" | jq -r '.workflow_runs[0].id // empty' || true)
         if [[ -n "${MANAGER_RUN_ID:-}" ]]; then
           KSU_MANAGER="https://github.com/pershoot/KernelSU-Next/actions/runs/${MANAGER_RUN_ID}"
         else
           KSU_MANAGER="https://github.com/pershoot/KernelSU-Next/actions/workflows/build-manager-ci.yml"
         fi
 
-        echo "KSU Ref: $KSU_VERSION_REF"
-        echo "KSU Commit: $(git rev-parse --short=8 HEAD)"
-        echo "Base branch: $BASE_BRANCH"
-        echo "Base commit: $BASE_COMMIT"
-        echo "Commit count: $COMMITS_COUNT"
+        echo "Loaded authoritative KernelSU build metadata from ${#METADATA_FILES[@]} artifact(s)"
+        echo "KSU Ref: $KSU_SOURCE_REF"
+        echo "KSU Commit: $KSUN_COMMIT"
+        echo "Base branch: $KSU_BASE_BRANCH"
+        echo "Base commit: $KSU_BASE_COMMIT"
+        echo "Commit count: $KSU_COMMITS_COUNT"
         echo "KSU Version: $KSU_VERSION"
-        echo "KSU Git Tag: $KSU_GIT_TAG"
-        echo "KSU Manager: $KSU_MANAGER"
 
-        # Export as environment for next step
-        echo "KSUN_BRANCH=$KSU_INPUT" >> $GITHUB_ENV
-        echo "KSUN_COMMIT=$KSUN_COMMIT" >> $GITHUB_ENV
-        echo "KSU_COMMITS_COUNT=$COMMITS_COUNT" >> $GITHUB_ENV
-        echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_ENV
-        echo "KSU_GIT_TAG=$KSU_GIT_TAG" >> $GITHUB_ENV
-        echo "KSU_MANAGER=$KSU_MANAGER" >> $GITHUB_ENV
+        {
+          echo "KSUN_BRANCH=$KSU_SOURCE_REF"
+          echo "KSUN_COMMIT=$KSUN_COMMIT"
+          echo "KSU_COMMITS_COUNT=$KSU_COMMITS_COUNT"
+          echo "KSU_VERSION=$KSU_VERSION"
+          echo "KSU_GIT_TAG=$KSU_GIT_TAG"
+          echo "KSU_MANAGER=$KSU_MANAGER"
+        } >> "$GITHUB_ENV"
 
     - name: Set release body
       run: |
