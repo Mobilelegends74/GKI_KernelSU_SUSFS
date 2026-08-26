@@ -493,6 +493,8 @@ jobs:
         SUSFS_REF="${SUSFS_BRANCH:-N/A}"
         SUSFS_SHA_VALUE="${SUSFS_SHA:-}"
         NOMOUNT_SHA_VALUE="${NOMOUNT_SHA:-}"
+        VPNHIDE_REF="${VPNHIDE_SOURCE_REF:-N/A}"
+        VPNHIDE_SHA_VALUE="${VPNHIDE_SHA:-}"
 
         if [ -n "$SUSFS_SHA_VALUE" ]; then
           SUSFS_SHORT_SHA="${SUSFS_SHA_VALUE:0:7}"
@@ -504,6 +506,12 @@ jobs:
           NOMOUNT_SHORT_SHA="${NOMOUNT_SHA_VALUE:0:7}"
         else
           NOMOUNT_SHORT_SHA="N/A"
+        fi
+
+        if [ -n "$VPNHIDE_SHA_VALUE" ]; then
+          VPNHIDE_SHORT_SHA="${VPNHIDE_SHA_VALUE:0:7}"
+        else
+          VPNHIDE_SHORT_SHA="N/A"
         fi
         
         # Get SUSFS version from susfs.h if available
@@ -533,6 +541,8 @@ jobs:
           echo "| **SUSFS Ref** | \`${SUSFS_REF}\` |"
           echo "| **SUSFS Commit** | \`${SUSFS_SHORT_SHA}\` |"
           echo "| **NoMount Commit** | \`${NOMOUNT_SHORT_SHA}\` |"
+          echo "| **VPNHide Ref** | \`${VPNHIDE_REF}\` |"
+          echo "| **VPNHide Commit** | \`${VPNHIDE_SHORT_SHA}\` |"
           echo "| **AnyKernel3** | \`${AK3_ARTIFACT_NAME:-N/A}\` |"
           echo "| **Feature Set** | ${FEATURE_SET} |"
           echo "| **Variant** | ${{ inputs.variant }} |"
@@ -545,6 +555,7 @@ jobs:
           echo "| KernelSU Next | ${KSU_VER}, \`${KSU_REF}\` @ \`${KSU_SHA}\` | $([ "$KSU_VER" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
           echo "| SUSFS | ${SUSFS_VER}, \`${SUSFS_REF}\` @ \`${SUSFS_SHORT_SHA}\` | $([ "$SUSFS_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
           echo "| NoMount dev | \`${NOMOUNT_SHORT_SHA}\` | $([ "$NOMOUNT_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
+          echo "| VPNHide Next | \`${VPNHIDE_REF}\` @ \`${VPNHIDE_SHORT_SHA}\` | $([ "$VPNHIDE_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
           echo
 
           echo "### Patch Stages"
@@ -558,6 +569,9 @@ jobs:
           fi
           if [ "$NOMOUNT_SHORT_SHA" != "N/A" ]; then
             echo "- NoMount fs/Kconfig/Makefile integration: ${PATCH_STATUS}"
+          fi
+          if [ "$VPNHIDE_SHORT_SHA" != "N/A" ]; then
+            echo "- VPNHide Next official in-tree kpatch integration: ${PATCH_STATUS}"
           fi
           case "$FEATURE_SET" in
             FULL|*BBG*) echo "- Baseband Guard patches: ${PATCH_STATUS}" ;;

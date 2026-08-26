@@ -29,6 +29,7 @@ runs:
         VPNHIDE_SHA="$(git -C "$VPNHIDE_SRC" rev-parse HEAD)"
 
         echo "VPNHide Next SHA: $VPNHIDE_SHA"
+        echo "VPNHIDE_SOURCE_REF=main" >> "$GITHUB_ENV"
         echo "VPNHIDE_SHA=$VPNHIDE_SHA" >> "$GITHUB_ENV"
 
     - name: Apply VPNHide Next Kernel Integration
