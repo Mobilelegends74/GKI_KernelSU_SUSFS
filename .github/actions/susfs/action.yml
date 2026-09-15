@@ -61,9 +61,20 @@ runs:
         mv "susfs4ksu-${SUSFS_ARCHIVE_REF}" susfs4ksu
 
         cd susfs4ksu
-        
-        patch -p1 < "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0001-pershoot-Allow-core-to-be-built-with-no-features.patch"
-        patch -p1 < "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0002-pershoot-Implement-SuSFS-and-Toolkit-coexistence.patch"
+
+        if [ -f "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0001-pershoot-Allow-core-to-be-built-with-no-features.patch" ]; then
+          echo "Applying pershoot patch 0001"
+          patch -p1 --forward < "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0001-pershoot-Allow-core-to-be-built-with-no-features.patch"
+        else
+          echo "pershoot patch 0001 not found, skipping"
+        fi
+
+        if [ -f "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0002-pershoot-Implement-SuSFS-and-Toolkit-coexistence.patch" ]; then
+          echo "Applying pershoot patch 0002"
+          patch -p1 --forward < "${{ github.workspace }}/kernel_patches/pershoot/susfs4ksu/0002-pershoot-Implement-SuSFS-and-Toolkit-coexistence.patch"
+        else
+          echo "pershoot patch 0002 not found, skipping"
+        fi
 
     - name: Enable Kernel Configs
       uses: ./.github/actions/set-kernel-config
