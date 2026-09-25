@@ -561,6 +561,7 @@ jobs:
           echo "| **AnyKernel3** | \`${AK3_ARTIFACT_NAME:-N/A}\` |"
           echo "| **Feature Set** | ${FEATURE_SET} |"
           echo "| **Variant** | ${{ inputs.variant }} |"
+          echo "| **Source Commit** | [${GITHUB_SHA:0:7}](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) |"
           echo
 
           echo "### Applied Integrations"
