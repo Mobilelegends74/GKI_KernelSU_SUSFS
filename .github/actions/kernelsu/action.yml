@@ -22,6 +22,12 @@ runs:
         fi
         KSU_SOURCE_REF="$KSU_INPUT"
 
+        # Always resolve the live remote tip; never reuse a cached/shallow ref.
+        REMOTE_SOURCE_SHA=""
+        if git ls-remote --heads "$KSU_REPO" "$KSU_INPUT" | grep -q .; then
+          REMOTE_SOURCE_SHA="$(git ls-remote "$KSU_REPO" "refs/heads/$KSU_INPUT" | awk 'NR==1 {print $1}')"
+        fi
+
         # Try as branch first, fall back to commit
         if git ls-remote --heads "$KSU_REPO" "$KSU_INPUT" | grep -q .; then
           echo "Using KernelSU-Next branch: $KSU_INPUT"
@@ -68,6 +74,12 @@ runs:
           git -C "$KSU_GIT_ROOT" fetch --unshallow --no-tags origin "${FETCH_REFS[@]}"
         else
           git -C "$KSU_GIT_ROOT" fetch --no-tags origin "${FETCH_REFS[@]}"
+        fi
+
+        RESOLVED_SOURCE_SHA="$(git -C "$KSU_GIT_ROOT" rev-parse "$SOURCE_REMOTE_REF")"
+        if [ -n "$REMOTE_SOURCE_SHA" ] && [ "$RESOLVED_SOURCE_SHA" != "$REMOTE_SOURCE_SHA" ]; then
+          echo "::error::KernelSU-Next source ref is stale: expected $REMOTE_SOURCE_SHA, got $RESOLVED_SOURCE_SHA"
+          exit 1
         fi
 
         GIT_SHALLOW="$(git -C "$KSU_GIT_ROOT" rev-parse --is-shallow-repository)"
