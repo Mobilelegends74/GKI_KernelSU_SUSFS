@@ -311,6 +311,7 @@ jobs:
           echo
           echo "**Feature Set:** ${{ inputs.feature_set }}"
           echo "**KSU Requested Ref:** ${{ inputs.ksu_branch || 'dev-susfs (latest)' }}"
+          echo "**Workflow Commit:** [${GITHUB_SHA:0:7}](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
           echo
           
           # Count successes and failures

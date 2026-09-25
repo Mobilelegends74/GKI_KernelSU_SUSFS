@@ -129,7 +129,14 @@ runs:
       run: |
         set -euo pipefail
         cp ${{ github.action_path }}/patches/static.patch "${{ github.workspace }}/kernel/KernelSU-Next/static.patch"
-        patch -p1 < static.patch
+        # Recent KernelSU-Next already exposes these helpers through
+        # SUSFS_EXPORT. Apply the legacy declaration patch only when the
+        # upstream source still uses the old static declarations.
+        if grep -q '^#define SUSFS_EXPORT' kernel/feature/selinux_hide.c; then
+          echo "KernelSU-Next already contains the SUSFS_EXPORT integration; skipping legacy static patch."
+        else
+          patch --forward -p1 < static.patch
+        fi
 
     - name: Enable Kernel Configs
       uses: ./.github/actions/set-kernel-config
