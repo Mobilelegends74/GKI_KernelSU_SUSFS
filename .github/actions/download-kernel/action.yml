@@ -81,18 +81,18 @@ runs:
           attempt=$((attempt+1))
         done
 
-        # Pin exact Android Common 6.1.174
+        # Pin exact Android Common 6.1.145
         if [[ "$VERSION" == "android14-6.1" && "${{ inputs.os_patch_level }}" == "lts" ]]; then
-          echo "Pinning kernel/common to android14-6.1.174_r00"
+          echo "Pinning kernel/common to android14-6.1.145_r00"
           cd common
 
-          git fetch --depth=1 https://android.googlesource.com/kernel/common refs/tags/android14-6.1.174_r00
+          git fetch --depth=1 https://android.googlesource.com/kernel/common refs/tags/android14-6.1.145_r00
           git checkout --detach FETCH_HEAD
 
           ACTUAL_SUBLEVEL="$(grep '^SUBLEVEL = ' Makefile | awk '{print $3}')"
 
-          if [[ "$ACTUAL_SUBLEVEL" != "174" ]]; then
-            echo "ERROR: expected SUBLEVEL 174, got $ACTUAL_SUBLEVEL"
+          if [[ "$ACTUAL_SUBLEVEL" != "145" ]]; then
+            echo "ERROR: expected SUBLEVEL 145, got $ACTUAL_SUBLEVEL"
             exit 1
           fi
 
