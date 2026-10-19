@@ -34,8 +34,8 @@ runs:
         SUSFS_ARCHIVE_REF="${{ inputs.susfs_commit }}"
 
         if [ -z "$SUSFS_ARCHIVE_REF" ]; then
-          SUSFS_ARCHIVE_REF="$SUSFS_BRANCH"
           SUSFS_SHA="$(git ls-remote "${SUSFS_REPO}.git" "refs/heads/$SUSFS_BRANCH" | awk 'NR == 1 { print $1 }')"
+          SUSFS_ARCHIVE_REF="$SUSFS_SHA"
         else
           SUSFS_SHA="$SUSFS_ARCHIVE_REF"
         fi
@@ -232,13 +232,18 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}/kernel/common
       run: |
+        set -euo pipefail
+        PATCH_FILE="50_add_susfs_in_gki-${{ inputs.version }}.patch"
+        ADAPTED=$(mktemp)
+        python3 "$GITHUB_WORKSPACE/scripts/susfs-namespace-context.py" "$PATCH_FILE" fs/namespace.c "$ADAPTED"
         if [[ "${{ inputs.version }}" == "android14-6.1" && "${{ inputs.sublevel }}" == "145" ]]; then
           # 6.1.145's Android fake patch adds one include in this context.
           # Allow patch to ignore that extra context line; all other hunks remain strict.
-          patch --fuzz=3 -p1 < 50_add_susfs_in_gki-${{ inputs.version }}.patch
+          patch --fuzz=3 -p1 < "$ADAPTED"
         else
-          patch -p1 < 50_add_susfs_in_gki-${{ inputs.version }}.patch
+          patch -p1 < "$ADAPTED"
         fi
+        rm -f "$ADAPTED"
 
     - name: Revert Android 12 5.10 Fake Patches
       shell: bash

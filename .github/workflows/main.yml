@@ -367,7 +367,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.test_release_notes && (inputs.release_type == 'Pre-Release' || inputs.release_type == 'Release') }}
+    if: ${{ !startsWith(github.ref_name, 'UIDFAKE-') && github.event_name == 'workflow_dispatch' && !inputs.test_release_notes && (inputs.release_type == 'Pre-Release' || inputs.release_type == 'Release') }}
     permissions:
       contents: write
     needs:
@@ -620,3 +620,22 @@ jobs:
         files: |
           release-assets/**/*.zip
           release-assets/**/*-boot*.img
+
+  release-uidfake:
+    needs: build-android14-6-1
+    if: ${{ !cancelled() && startsWith(github.ref_name, 'UIDFAKE-') && needs.build-android14-6-1.result == 'success' && (inputs.release_type == 'Release' || inputs.release_type == 'Pre-Release') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TYPE: ${{ inputs.release_type }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: AK3_*_UIDFAKE
+          path: release-assets
+          merge-multiple: false
+      - name: Verify and publish UIDFAKE release
+        run: python3 scripts/uidfake-publish-gki.py release-assets

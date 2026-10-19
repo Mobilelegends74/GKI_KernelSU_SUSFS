@@ -194,6 +194,9 @@ jobs:
           exit 1
         fi
 
+        if [[ "$GITHUB_REF_NAME" == UIDFAKE-* ]]; then
+          AK3_NAME="${AK3_NAME}_UIDFAKE"
+        fi
         echo "AnyKernel3 artifact name: $AK3_NAME"
         echo "AK3_ARTIFACT_NAME=$AK3_NAME" >> "$GITHUB_ENV"
 
@@ -432,6 +435,17 @@ jobs:
         echo "Calculated KSU_VERSION: $KSU_VERSION"
         echo "==================================="
 
+    - name: Integrate native HMA UIDFAKE
+      if: startsWith(github.ref_name, 'UIDFAKE-')
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "${{ inputs.version }}" = android14-6.1
+        test "${{ steps.extract.outputs.sublevel }}" = 145
+        python3 scripts/uidfake-test-native.py
+        bash scripts/uidfake-integrate-kernel.sh "$GITHUB_WORKSPACE/kernel/common"
+        python3 scripts/uidfake-check-kabi.py "$GITHUB_WORKSPACE/kernel/common"
+
     - name: Build Normal Kernel
       env:
         SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
@@ -476,6 +490,17 @@ jobs:
       with:
         bypass: true
         version: ${{ inputs.version }}
+
+    - name: Package and verify native UIDFAKE
+      if: startsWith(github.ref_name, 'UIDFAKE-')
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash scripts/uidfake-stage-anykernel.sh "$GITHUB_WORKSPACE/AnyKernel3"
+        python3 scripts/uidfake-gki-build-metadata.py "$GITHUB_WORKSPACE/AnyKernel3"
+        ZIP_PATH="$RUNNER_TEMP/${AK3_ARTIFACT_NAME}.zip"
+        (cd AnyKernel3 && zip -qr "$ZIP_PATH" . -x '.git/*')
+        python3 scripts/uidfake-verify-zip.py "$ZIP_PATH"
 
     - name: 📋 Consolidated Build Summary
       if: ${{ always() }}
