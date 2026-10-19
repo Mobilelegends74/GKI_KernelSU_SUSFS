@@ -7,21 +7,21 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import zipfile
 
 root = Path(sys.argv[1]).resolve()
-dirs = sorted(p for p in root.glob('AK3_*_UIDFAKE') if p.is_dir())
-assert len(dirs) == 1, f'Expected one GKI 6.1.145 build, got {dirs}'
-payload = dirs[0]
-metadata = json.loads((payload / 'uidfake/build-metadata.json').read_text())
-assert metadata['GITHUB_SHA'] == os.environ['GITHUB_SHA']
-assert metadata['GITHUB_RUN_ID'] == os.environ['GITHUB_RUN_ID']
-archive = root / (payload.name + '.zip')
-subprocess.run(['zip', '-qr', str(archive), '.', '-x', '.git/*'], cwd=payload, check=True)
+archives = sorted(root.glob('AK3_*_UIDFAKE.zip'))
+assert len(archives) == 1, f'Expected one original UIDFAKE ZIP, got {archives}'
+archive = archives[0]
+with zipfile.ZipFile(archive) as z:
+    metadata = json.loads(z.read('uidfake/build-metadata.json'))
+assert metadata['GITHUB_SHA'] == os.environ['BUILD_SOURCE_SHA']
+assert metadata['GITHUB_RUN_ID'] == os.environ['BUILD_RUN_ID']
 subprocess.run([sys.executable, 'scripts/uidfake-verify-zip.py', str(archive)], check=True)
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
 date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-tag = f'gki-android14-6.1.145-{date}-build{os.environ["GITHUB_RUN_NUMBER"]}-{os.environ["GITHUB_RUN_ATTEMPT"]}-uidfake'
-title = f'GKI Android 14 | Linux 6.1.145 | KSUN {metadata["KSU_VERSION"]} | UIDFAKE | Build {os.environ["GITHUB_RUN_NUMBER"]}'
+tag = f'gki-android14-6.1.145-{date}-build{os.environ["BUILD_RUN_NUMBER"]}-{os.environ["BUILD_RUN_ATTEMPT"]}-uidfake'
+title = f'GKI Android 14 | Linux 6.1.145 | KSUN {metadata["KSU_VERSION"]} | UIDFAKE | Build {os.environ["BUILD_RUN_NUMBER"]}'
 repo = os.environ['GITHUB_REPOSITORY']
 run_url = f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'
 notes = f'''# GKI Android 14 — Linux 6.1.145 · UIDFAKE
@@ -44,7 +44,7 @@ notes = f'''# GKI Android 14 — Linux 6.1.145 · UIDFAKE
 | NoMount | **v2.1.1 stable**, `{metadata['NOMOUNT_SHA']}` |
 | UIDFAKE | Нативный патч, включён в Normal и Bypass Images |
 
-[Исходники и патч UIDFAKE](https://github.com/{repo}/tree/{metadata['GITHUB_SHA']}/uidfake) · [Описание интеграции](https://github.com/{repo}/blob/{metadata['GITHUB_SHA']}/docs/uidfake-gki.md) · [Успешная сборка]({run_url})
+[Исходники и патч UIDFAKE](https://github.com/{repo}/tree/{metadata['GITHUB_SHA']}/uidfake) · [Описание интеграции](https://github.com/{repo}/blob/{os.environ['GITHUB_SHA']}/docs/uidfake-gki.md) · [Успешная сборка]({os.environ['BUILD_JOB_URL']}) · [Публикация]({run_url})
 
 Патч, конфигурация ядра и проверочные сведения включены в ZIP. CI проверяет тесты политики UIDFAKE, сохранение KABI, конфигурацию и оба ARM64 Image. Успешная сборка не является проверкой загрузки и всех хуков на устройстве.
 
@@ -61,8 +61,11 @@ SHA-256 (`{archive.name}`):
 '''
 notes_path = root / 'release-notes.md'
 notes_path.write_text(notes)
+if '--verify-only' in sys.argv:
+    print(f'Verified original ZIP without repacking: {archive}\nTag: {tag}\nSHA256: {digest}')
+    sys.exit(0)
 subprocess.run(['gh', 'release', 'create', tag, '--repo', repo,
-                '--target', os.environ['GITHUB_SHA'], '--title', title,
+                '--target', metadata['GITHUB_SHA'], '--title', title,
                 '--notes-file', str(notes_path), '--draft', str(archive)], check=True)
 flags = ['--prerelease', '--latest=false'] if os.environ['RELEASE_TYPE'] == 'Pre-Release' else ['--prerelease=false', '--latest']
 subprocess.run(['gh', 'release', 'edit', tag, '--repo', repo, '--draft=false', *flags], check=True)

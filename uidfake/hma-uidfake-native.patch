@@ -101,7 +101,7 @@
  	if (error)
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -1565,12 +1565,20 @@
+@@ -1553,12 +1553,20 @@
  	ANDROID_KABI_RESERVE(5);
  	ANDROID_KABI_RESERVE(6);
  	ANDROID_KABI_RESERVE(7);

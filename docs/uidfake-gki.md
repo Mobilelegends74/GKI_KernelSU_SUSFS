@@ -101,7 +101,7 @@ config intentionally takes priority, as in upstream. Multi-user HMA config
 discovery is limited by the upstream helper's user-0 paths; arbitrary Android
 user/profile support has not been implemented or claimed.
 
-The kernel patch itself has no KernelSU dependency. The supplied OP13R boot
+The kernel patch itself has no KernelSU dependency. The supplied Android boot
 adapter uses the service.d facility already present in this KernelSU kernel.
 For other ROM/root distributions the builder must provide a privileged boot
 runner (Android init can execute uidfake-kernel/service.sh); no universal
@@ -121,7 +121,7 @@ preserved. Ordinary HMA/HMA-OSS app/LSPosed prerequisites remain their own.
   Droidspaces/SYSVIPC or SLIM_SCHED are not reused. The SYSVIPC patch combination
   is regression-checked; on this combination UIDFAKE uses slot 5, not 6–8.
 - CI checks the final CONFIG_HMA_UIDFAKE_BUILTIN=y and builds Image.
-- CI also checks the built-in archive and Image marker; the ZIP includes the
+- CI also checks Normal and Bypass Image markers; the ZIP includes the
   final kernel.config and UIDFAKE entries from System.map in build-verification.txt.
 - The ZIP is marked _UIDFAKE and contains the companion, service, README and patch.
 - On the phone still verify boot, SELinux denials, service autostart after reboot,
@@ -131,5 +131,5 @@ preserved. Ordinary HMA/HMA-OSS app/LSPosed prerequisites remain their own.
   ANDROID_KABI_USE, preserving structure size, offsets and genksyms representation.
   Other kernels get a conditional field before thread_struct; vendor/KMI
   compatibility and other architectures still need independent validation.
-- Source anchors avoid Android/Linux version-number checks; a successful OP13R
+- Source anchors avoid Android/Linux version-number checks; a successful GKI
   build does not prove compatibility with every kernel version or OEM.
