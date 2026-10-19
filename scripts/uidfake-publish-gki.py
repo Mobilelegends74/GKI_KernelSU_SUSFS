@@ -64,8 +64,18 @@ notes_path.write_text(notes)
 if '--verify-only' in sys.argv:
     print(f'Verified original ZIP without repacking: {archive}\nTag: {tag}\nSHA256: {digest}')
     sys.exit(0)
+# Do not send a historical target_commitish when the correct tag already
+# exists: GitHub can reject that field for its restricted workflow token.
+tag_commit = subprocess.run(['gh', 'api', f'repos/{repo}/commits/{tag}', '--jq', '.sha'],
+                            text=True, capture_output=True)
+if tag_commit.returncode == 0:
+    assert tag_commit.stdout.strip() == metadata['GITHUB_SHA'], 'Release tag points to another build'
+    target_flags = ['--verify-tag']
+else:
+    assert metadata['GITHUB_SHA'] == os.environ['GITHUB_SHA'], 'Pre-create the tag on the historical source commit before publishing this build'
+    target_flags = ['--target', os.environ['GITHUB_REF_NAME']]
 subprocess.run(['gh', 'release', 'create', tag, '--repo', repo,
-                '--target', metadata['GITHUB_SHA'], '--title', title,
+                *target_flags, '--title', title,
                 '--notes-file', str(notes_path), '--draft', str(archive)], check=True)
 flags = ['--prerelease', '--latest=false'] if os.environ['RELEASE_TYPE'] == 'Pre-Release' else ['--prerelease=false', '--latest']
 subprocess.run(['gh', 'release', 'edit', tag, '--repo', repo, '--draft=false', *flags], check=True)
