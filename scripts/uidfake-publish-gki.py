@@ -73,7 +73,8 @@ if tag_commit.returncode == 0:
     target_flags = ['--verify-tag']
 else:
     assert metadata['GITHUB_SHA'] == os.environ['GITHUB_SHA'], 'Pre-create the tag on the historical source commit before publishing this build'
-    target_flags = ['--target', os.environ['GITHUB_REF_NAME']]
+    # Never substitute a moving branch tip for the commit actually compiled.
+    target_flags = ['--target', metadata['GITHUB_SHA']]
 subprocess.run(['gh', 'release', 'create', tag, '--repo', repo,
                 *target_flags, '--title', title,
                 '--notes-file', str(notes_path), '--draft', str(archive)], check=True)
