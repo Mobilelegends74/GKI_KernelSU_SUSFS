@@ -378,7 +378,7 @@ jobs:
     - name: Cache ccache (GitHub Native)
       id: native-ccache
       if: inputs.version == 'android12-5.10' || inputs.version == 'android13-5.10' || inputs.version == 'android13-5.15'
-      uses: actions/cache@v6
+      uses: actions/cache/restore@v6
       with:
         path: /home/runner/.ccache
         key: ccache-v2-${{ runner.os }}-${{ inputs.version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.feature_set }}-${{ inputs.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -396,7 +396,7 @@ jobs:
     - name: Cache bazel-cache (GitHub Native)
       id: native-bazel
       if: steps.kleaf-cache.outcome == 'success'
-      uses: actions/cache@v6
+      uses: actions/cache/restore@v6
       with:
         path: |
           /home/runner/.cache/bazel
@@ -711,3 +711,19 @@ jobs:
         path: ${{ github.workspace }}/AnyKernel3/**
         if-no-files-found: ignore
         compression-level: 9
+
+    - name: Save updated ccache snapshot
+      if: success() && steps.native-ccache.outcome == 'success'
+      uses: actions/cache/save@v6
+      with:
+        path: /home/runner/.ccache
+        key: ${{ steps.native-ccache.outputs.cache-primary-key }}
+
+    - name: Save updated Kleaf compilation snapshot
+      if: success() && steps.native-bazel.outcome == 'success'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          /home/runner/.cache/bazel
+          /home/runner/.cache/kleaf
+        key: ${{ steps.native-bazel.outputs.cache-primary-key }}
