@@ -12,6 +12,7 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+import time
 
 ROOTS = ('common', 'KernelSU-Next', 'build/kernel')
 EXCLUDE = {'.git', '.repo', 'out', 'dist', '__pycache__'}
@@ -67,6 +68,8 @@ def process(mode, kernel, manifest):
         old = data['files']
     files = {}
     restored = 0
+    refreshed = 0
+    now = time.time_ns()
     for name, path in inputs(kernel):
         sig = signature(path)
         info = path.stat()
@@ -75,12 +78,17 @@ def process(mode, kernel, manifest):
             if previous and previous[:2] == sig:
                 os.utime(path, ns=(info.st_atime_ns, previous[2]))
                 restored += 1
+            else:
+                # Archives/cp -a can preserve an old source mtime even when the
+                # contents changed. Never let it masquerade as an older input.
+                os.utime(path, ns=(info.st_atime_ns, max(now, info.st_mtime_ns)))
+                refreshed += 1
         else:
             files[name] = sig + [info.st_mtime_ns]
     if mode == 'save':
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text(json.dumps({'version': 1, 'files': files}) + '\n')
-    print(f'Kernel input state: {len(files)} saved, {restored} content-identical timestamps restored')
+    print(f'Kernel input state: {len(files)} saved, {restored} content-identical timestamps restored, {refreshed} new/changed inputs refreshed')
 
 
 if __name__ == '__main__':
