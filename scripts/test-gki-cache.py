@@ -16,13 +16,11 @@ with tempfile.TemporaryDirectory() as temp:
     common.mkdir()
     (common / 'value.h').write_text('#define VALUE 1\n')
     (common / 'main.c').write_text('#include "value.h"\nint main(void) { return VALUE; }\n')
-    (common / 'Makefile').write_text('result: main.c value.h\n\tcc main.c -o result\n')
+    (common / 'Makefile').write_text('../result: main.c value.h\n\tcc main.c -o ../result\n')
     manifest = root / 'cache/state.json'
     subprocess.run(['make', '-C', str(common)], check=True, capture_output=True)
-    # Actual build outputs belong outside the source snapshot.
-    (common / 'result').rename(root / 'result')
+    # Like Kleaf, place build outputs outside the source snapshot.
     cache.process('save', root, manifest)
-    (root / 'result').rename(common / 'result')
     time.sleep(0.03)
     os.utime(common / 'main.c', None)
     os.utime(common / 'value.h', None)
@@ -36,7 +34,7 @@ with tempfile.TemporaryDirectory() as temp:
     assert (common / 'value.h').stat().st_mtime_ns > changed
     assert subprocess.run(['make', '-q', '-C', str(common)], capture_output=True).returncode == 1
     subprocess.run(['make', '-C', str(common)], check=True, capture_output=True)
-    assert subprocess.run([str(common / 'result')]).returncode == 2
+    assert subprocess.run([str(root / 'result')]).returncode == 2
     (common / 'new.c').write_text('/* new */\n')
     fresh = (common / 'new.c').stat().st_mtime_ns
     cache.process('restore', root, manifest)
