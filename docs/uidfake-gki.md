@@ -1,5 +1,18 @@
 # HMA UIDFAKE native integration — Android GKI 6.1.145
 
+## SELinux timing and current stable NoMount
+
+The build includes the reviewed KernelSU PR3938 backport, pinned at
+ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a, before compiling Normal and Bypass.
+See patches/selinux/README.md. SELinux permission checks remain enabled;
+the separate throne-hunt finding is not addressed. Device testing is still needed.
+
+NoMount resolves GitHub's latest non-draft, non-prerelease stable release for
+each new build, validates the tag-to-SHA mapping and checks the cloned SHA.
+The exact release tag and commit, KernelSU/SUSFS commits and SELinux patch
+identity are recorded in uidfake/build-metadata.json inside the AnyKernel ZIP.
+Release notes link those recorded revisions, not a moving HEAD at publish time.
+
 Branch: `UIDFAKE-android14-6.1.145-build-base37505913520`.
 Baseline: GKI build 37505913520, source dc57c5cdbcdd38451de06dca44a378e4cd0e64cc,
 Android 14 / Linux 6.1.145. KernelSU Next and SUSFS resolve their latest working

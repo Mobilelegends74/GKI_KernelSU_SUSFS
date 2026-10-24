@@ -38,11 +38,19 @@ summary += [s for s in symbols.read_text().splitlines()
 (payload / 'build-verification.txt').write_text('\n'.join(summary) + '\n')
 metadata = {key: os.environ.get(key, '') for key in (
     'GITHUB_SHA', 'GITHUB_RUN_ID', 'KSU_VERSION', 'KSUN_COMMIT',
-    'KSU_SOURCE_REF', 'SUSFS_SHA', 'SUSFS_BRANCH', 'NOMOUNT_SHA')}
+    'KSU_SOURCE_REF', 'SUSFS_SHA', 'SUSFS_BRANCH', 'NOMOUNT_SHA', 'NOMOUNT_TAG',
+    'SELINUX_TIMING_PATCH')}
 metadata['kernel'] = 'android14-6.1.145_r00'
 susfs = workspace / 'kernel/common/include/linux/susfs.h'
 metadata['susfs_version'] = re.search(r'#define SUSFS_VERSION\s+"([^"]+)"', susfs.read_text())[1]
 assert metadata['KSU_VERSION'].isdigit()
+assert re.fullmatch(r'v?\d+\.\d+\.\d+', metadata['NOMOUNT_TAG'])
+assert metadata['SELINUX_TIMING_PATCH'] == 'ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a'
+selinux_patch = workspace / 'patches/selinux/0001-ksu-reduce-selinux-hide-timing.patch'
+import hashlib
+metadata['SELINUX_PATCH_SHA256'] = hashlib.sha256(selinux_patch.read_bytes()).hexdigest()
+(payload / 'selinux-timing.patch').write_bytes(selinux_patch.read_bytes())
+(payload / 'SELINUX-PATCH.txt').write_bytes((workspace / 'patches/selinux/README.md').read_bytes())
 for key in ('KSUN_COMMIT', 'SUSFS_SHA', 'NOMOUNT_SHA'):
     assert re.fullmatch(r'[0-9a-f]{40}', metadata[key]), (key, metadata[key])
 (payload / 'build-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')

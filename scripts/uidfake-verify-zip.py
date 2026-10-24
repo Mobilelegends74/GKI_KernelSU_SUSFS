@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the delivered GKI archive, including both existing Image variants."""
 import hashlib
+import json
 from pathlib import Path
 import sys
 import zipfile
@@ -36,5 +37,10 @@ with zipfile.ZipFile(archive) as z:
     assert 'ANDROID_KABI_USE' in patch, 'Android task KABI reservation missing'
     assert 'hma_uidfake-y := core.o policy.o netlink.o' in patch
     assert archive.name.endswith('_UIDFAKE.zip'), 'archive label missing'
+    metadata = json.loads(z.read('uidfake/build-metadata.json'))
+    if metadata.get('SELINUX_TIMING_PATCH'):
+        assert metadata['SELINUX_TIMING_PATCH'] == 'ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a'
+        assert hashlib.sha256(z.read('uidfake/selinux-timing.patch')).hexdigest() == metadata['SELINUX_PATCH_SHA256']
+        assert 'uidfake/SELINUX-PATCH.txt' in names
 print('UIDFAKE ZIP verified: Image, native patch, checksum-pinned helper, boot service and no UIDFAKE LKM')
 print(hashlib.sha256(archive.read_bytes()).hexdigest(), archive.name)

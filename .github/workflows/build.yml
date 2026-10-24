@@ -144,6 +144,10 @@ jobs:
         sublevel: ${{ steps.extract.outputs.sublevel }}
         os_patch_level: ${{ inputs.os_patch_level }}
 
+    - name: Test stable release resolution and release metadata policy
+      shell: bash
+      run: python3 scripts/test-gki-release-policy.py
+
     - name: Setup KernelSU-Next
       if: contains(inputs.feature_set, 'KSUN') || inputs.feature_set == 'FULL'
       uses: ./.github/actions/kernelsu
@@ -161,11 +165,21 @@ jobs:
         os_patch_level: ${{ inputs.os_patch_level }}
         sublevel: ${{ steps.extract.outputs.sublevel }}
 
+    - name: Apply reviewed SELinux timing backport
+      if: ${{ startsWith(github.ref_name, 'UIDFAKE-') && inputs.version == 'android14-6.1' && (contains(inputs.feature_set, 'KSUN') || inputs.feature_set == 'FULL') }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash scripts/apply-selinux-timing.sh "$GITHUB_WORKSPACE/kernel/KernelSU-Next"
+        echo 'SELINUX_TIMING_PATCH=ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a' >> "$GITHUB_ENV"
+
     - name: NoMount
 
       if: inputs.version == 'android14-6.1'
 
       uses: ./.github/actions/nomount
+      env:
+        GH_TOKEN: ${{ github.token }}
 
 
     - name: Set AnyKernel3 Artifact Name
@@ -595,7 +609,7 @@ jobs:
           echo "|-----------|------------------------|--------|"
           echo "| KernelSU Next | ${KSU_VER}, \`${KSU_REF}\` @ \`${KSU_SHA}\` | $([ "$KSU_VER" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
           echo "| SUSFS | ${SUSFS_VER}, \`${SUSFS_REF}\` @ \`${SUSFS_SHORT_SHA}\` | $([ "$SUSFS_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
-          echo "| NoMount dev | \`${NOMOUNT_SHORT_SHA}\` | $([ "$NOMOUNT_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
+          echo "| NoMount stable ${NOMOUNT_TAG:-} | \`${NOMOUNT_SHORT_SHA}\` | $([ "$NOMOUNT_SHORT_SHA" = "N/A" ] && echo 'not selected' || echo "$PATCH_STATUS") |"
           echo
 
           echo "### Patch Stages"
