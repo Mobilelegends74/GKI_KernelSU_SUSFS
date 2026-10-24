@@ -66,6 +66,7 @@ runs:
           --config=fast \
           --config=stamp \
           --disk_cache=/home/runner/.cache/bazel \
+          --cache_dir=/home/runner/.cache/kleaf \
           //common:kernel_aarch64/Image
       fi
 

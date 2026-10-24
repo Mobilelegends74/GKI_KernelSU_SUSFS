@@ -146,7 +146,9 @@ jobs:
 
     - name: Test stable release resolution and release metadata policy
       shell: bash
-      run: python3 scripts/test-gki-release-policy.py
+      run: |
+        python3 scripts/test-gki-release-policy.py
+        python3 scripts/test-gki-cache.py
 
     - name: Setup KernelSU-Next
       if: contains(inputs.feature_set, 'KSUN') || inputs.feature_set == 'FULL'
@@ -374,30 +376,40 @@ jobs:
           ${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-
 
     - name: Cache ccache (GitHub Native)
+      id: native-ccache
+      if: inputs.version == 'android12-5.10' || inputs.version == 'android13-5.10' || inputs.version == 'android13-5.15'
       uses: actions/cache@v6
       with:
         path: /home/runner/.ccache
-        key: ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.os_patch_level }}
+        key: ccache-v2-${{ runner.os }}-${{ inputs.version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.feature_set }}-${{ inputs.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-
-          ccache-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
-          ccache-
+          ccache-v2-${{ runner.os }}-${{ inputs.version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.feature_set }}-${{ inputs.variant }}-
+
+    - name: Identify compatible Kleaf cache
+      id: kleaf-cache
+      if: inputs.version == 'android14-5.15' || inputs.version == 'android14-6.1' || inputs.version == 'android15-6.6' || inputs.version == 'android16-6.12'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 scripts/gki-cache-state.py identity "$GITHUB_WORKSPACE/kernel" >> "$GITHUB_OUTPUT"
 
     - name: Cache bazel-cache (GitHub Native)
+      id: native-bazel
+      if: steps.kleaf-cache.outcome == 'success'
       uses: actions/cache@v6
       with:
-        path: /home/runner/.cache/bazel
-        key: bazel-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.os_patch_level }}
+        path: |
+          /home/runner/.cache/bazel
+          /home/runner/.cache/kleaf
+        key: kleaf-v2-${{ runner.os }}-${{ inputs.version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.feature_set }}-${{ inputs.variant }}-${{ steps.kleaf-cache.outputs.identity }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          bazel-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ steps.extract.outputs.sublevel }}-
-          bazel-${{ inputs.android_version }}-${{ inputs.kernel_version }}-
-          bazel-
+          kleaf-v2-${{ runner.os }}-${{ inputs.version }}.${{ steps.extract.outputs.sublevel }}-${{ inputs.feature_set }}-${{ inputs.variant }}-${{ steps.kleaf-cache.outputs.identity }}-
 
     - name: Check cache hit
       run: |
         echo "Cache restore status:"
-        CCACHE_HIT="${{ steps.restore-ccache.outputs.cache-hit || 'skipped' }}"
-        BAZEL_HIT="${{ steps.restore-bazel.outputs.cache-hit || 'skipped' }}"
+        CCACHE_HIT="${{ steps.native-ccache.outputs.cache-matched-key || 'not restored' }}"
+        BAZEL_HIT="${{ steps.native-bazel.outputs.cache-matched-key || 'not restored' }}"
         echo "  ccache: $CCACHE_HIT"
         echo "  bazel: $BAZEL_HIT"
 
@@ -467,6 +479,11 @@ jobs:
       shell: bash
       run: bash scripts/integrate-vpnhide-gki.sh
 
+    - name: Restore timestamps of content-identical kernel inputs
+      if: steps.kleaf-cache.outcome == 'success'
+      shell: bash
+      run: python3 scripts/gki-cache-state.py restore "$GITHUB_WORKSPACE/kernel" /home/runner/.cache/kleaf/source-state.json
+
     - name: Build Normal Kernel
       env:
         SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
@@ -511,6 +528,22 @@ jobs:
       with:
         bypass: true
         version: ${{ inputs.version }}
+
+    - name: Record incremental kernel cache and input state
+      if: steps.kleaf-cache.outcome == 'success'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 scripts/gki-cache-state.py save "$GITHUB_WORKSPACE/kernel" /home/runner/.cache/kleaf/source-state.json
+        {
+          echo '## Persistent kernel compilation cache'
+          echo 'Restored: `${{ steps.native-bazel.outputs.cache-matched-key || 'cold cache' }}`'
+          echo 'New snapshot: `${{ steps.native-bazel.outputs.cache-primary-key }}`'
+          echo '```text'
+          du -sh /home/runner/.cache/bazel /home/runner/.cache/kleaf
+          echo "Object files: $(find /home/runner/.cache/kleaf -type f -name '*.o' | wc -l)"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Package and verify native UIDFAKE
       if: startsWith(github.ref_name, 'UIDFAKE-')
