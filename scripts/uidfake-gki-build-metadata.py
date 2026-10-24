@@ -26,9 +26,13 @@ def find_output(name, predicate):
 
 config = find_output('.config', lambda s: 'CONFIG_HMA_UIDFAKE_BUILTIN=y' in s.splitlines())
 symbols = find_output('System.map', lambda s: 'hma_uidfake_translate' in s)
+for option in ('CONFIG_VPNHIDE=y', 'CONFIG_VPNHIDE_FS_HIDING=y'):
+    assert option in config.read_text().splitlines(), option
+assert 'vpnhide_' in symbols.read_text(), 'VPNHide symbols missing'
 for name in ('Image', 'Bypass-Image'):
     image = (ak3 / name).read_bytes()
     assert image[56:60] == b'ARMd' and b'hma_uidfake: native built-in policy ready' in image
+    assert b'vpnhide_ctl' in image, f'VPNHide missing from {name}'
 payload = ak3 / 'uidfake'
 (payload / 'kernel.config').write_bytes(config.read_bytes())
 summary = [f'Source commit: {os.environ["GITHUB_SHA"]}',
@@ -39,7 +43,7 @@ summary += [s for s in symbols.read_text().splitlines()
 metadata = {key: os.environ.get(key, '') for key in (
     'GITHUB_SHA', 'GITHUB_RUN_ID', 'KSU_VERSION', 'KSUN_COMMIT',
     'KSU_SOURCE_REF', 'SUSFS_SHA', 'SUSFS_BRANCH', 'NOMOUNT_SHA', 'NOMOUNT_TAG',
-    'SELINUX_TIMING_PATCH')}
+    'SELINUX_TIMING_PATCH', 'VPNHIDE_COMMIT_SHA', 'VPNHIDE_RUN_ID', 'VPNHIDE_RUN_URL')}
 metadata['kernel'] = 'android14-6.1.145_r00'
 susfs = workspace / 'kernel/common/include/linux/susfs.h'
 metadata['susfs_version'] = re.search(r'#define SUSFS_VERSION\s+"([^"]+)"', susfs.read_text())[1]
@@ -48,6 +52,16 @@ assert re.fullmatch(r'v?\d+\.\d+\.\d+', metadata['NOMOUNT_TAG'])
 assert metadata['SELINUX_TIMING_PATCH'] == 'ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a'
 selinux_patch = workspace / 'patches/selinux/0001-ksu-reduce-selinux-hide-timing.patch'
 import hashlib
+assert re.fullmatch(r'[0-9a-f]{40}', metadata['VPNHIDE_COMMIT_SHA'])
+assert metadata['VPNHIDE_RUN_ID'].isdigit()
+assert metadata['VPNHIDE_RUN_URL'] == 'https://github.com/okhsunrog/vpnhide/actions/runs/' + metadata['VPNHIDE_RUN_ID']
+vpnhide_payload = ak3 / 'vpnhide'
+vpnhide_payload.mkdir()
+for name in ('vpnhide.patch', 'report.json', 'report.md'):
+    (vpnhide_payload / name).write_bytes((workspace / 'vpnhide-review' / name).read_bytes())
+(vpnhide_payload / 'LICENSE').write_bytes((workspace / 'vpnhide-source/LICENSE').read_bytes())
+(vpnhide_payload / 'README.md').write_bytes((workspace / 'docs/vpnhide-gki.md').read_bytes())
+metadata['VPNHIDE_PATCH_SHA256'] = hashlib.sha256((vpnhide_payload / 'vpnhide.patch').read_bytes()).hexdigest()
 metadata['SELINUX_PATCH_SHA256'] = hashlib.sha256(selinux_patch.read_bytes()).hexdigest()
 (payload / 'selinux-timing.patch').write_bytes(selinux_patch.read_bytes())
 (payload / 'SELINUX-PATCH.txt').write_bytes((workspace / 'patches/selinux/README.md').read_bytes())

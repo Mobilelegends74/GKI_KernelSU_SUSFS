@@ -23,6 +23,18 @@ date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 tag = f'gki-android14-6.1.145-{date}-build{os.environ["BUILD_RUN_NUMBER"]}-{os.environ["BUILD_RUN_ATTEMPT"]}-uidfake'
 title = f'GKI Android 14 | Linux 6.1.145 | KSUN {metadata["KSU_VERSION"]} | UIDFAKE | Build {os.environ["BUILD_RUN_NUMBER"]}'
 repo = os.environ['GITHUB_REPOSITORY']
+vpnhide_sha = metadata.get('VPNHIDE_COMMIT_SHA', '')
+if vpnhide_sha:
+    title = title.replace('| UIDFAKE |', '| UIDFAKE + VPNHide |')
+vpnhide_change = ('- Добавлен **VPNHide built-in** (`CONFIG_VPNHIDE=y`, включая VFS hiding) в Normal и Bypass. '
+                  'Без отдельного `.ko`; исходники автоматически выбираются по последнему успешному upstream CI ветки main.\n'
+                  if vpnhide_sha else '')
+vpnhide_row = (f'| VPNHide built-in | [`{vpnhide_sha[:8]}`](https://github.com/okhsunrog/vpnhide/commit/{vpnhide_sha}) · '
+               f'[upstream CI]({metadata["VPNHIDE_RUN_URL"]}) |\n' if vpnhide_sha else '')
+vpnhide_install = (f'\nДля VPNHide установите приложение и **built-in companion** из [upstream CI]({metadata["VPNHIDE_RUN_URL"]}), '
+                   'затем выберите приложения. Companion передаёт настройки встроенному backend и не загружает `.ko`. '
+                   f'[Инструкция](https://github.com/{repo}/blob/{metadata["GITHUB_SHA"]}/docs/vpnhide-gki.md).\n'
+                   if vpnhide_sha else '')
 run_url = f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'
 nomount_tag = metadata.get('NOMOUNT_TAG')
 if not nomount_tag:
@@ -41,6 +53,8 @@ notes = f'''# GKI Android 14 — Linux 6.1.145 · UIDFAKE
 
 ## Изменения
 
+{vpnhide_change}
+
 {selinux_change}- Сохранён нативный **HMA UIDFAKE**, встроенный в ядро (`CONFIG_HMA_UIDFAKE_BUILTIN=y`), и автоматическая синхронизация правил HMA/HMA-OSS. Отдельный `.ko` или модуль UIDFAKE не нужен.
 - KernelSU Next и SUSFS получены из актуальных рабочих веток на момент запуска. Старые версии не закреплены; фактические SHA записаны ниже и внутри ZIP.
 - NoMount: **{nomount_tag} stable**. Для новых сборок автоматически выбирается последний опубликованный стабильный релиз, без привязки к конкретному номеру; prerelease и dev не выбираются.
@@ -55,7 +69,7 @@ notes = f'''# GKI Android 14 — Linux 6.1.145 · UIDFAKE
 | SUSFS | **{metadata['susfs_version']}**, [`{metadata['SUSFS_SHA'][:8]}`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/{metadata['SUSFS_SHA']}) |
 | NoMount | [{nomount_tag} stable](https://github.com/maxsteeel/nomount/releases/tag/{nomount_tag}) · [`{metadata['NOMOUNT_SHA'][:8]}`](https://github.com/maxsteeel/nomount/commit/{metadata['NOMOUNT_SHA']}) |
 | UIDFAKE | Нативный патч, включён в Normal и Bypass Images |
-{selinux_row}
+{vpnhide_row}{selinux_row}
 
 [Исходники и патч UIDFAKE](https://github.com/{repo}/tree/{metadata['GITHUB_SHA']}/uidfake) · [Описание интеграции](https://github.com/{repo}/blob/{os.environ['GITHUB_SHA']}/docs/uidfake-gki.md) · [Успешная сборка]({os.environ['BUILD_JOB_URL']}) · [Публикация]({run_url})
 
@@ -65,12 +79,13 @@ notes = f'''# GKI Android 14 — Linux 6.1.145 · UIDFAKE
 
 Только для совместимых ARM64-устройств Android GKI с ядром 6.1. Совпадения версии Android недостаточно: проверьте совместимость boot-образа и прошивки. Сделайте резервную копию boot. При наличии отдельного UIDFAKE LKM отключите его перед установкой. Прошивайте AnyKernel3 ZIP из загруженного Android с root и доступным `/data/adb` — установщик автоматически добавит службу синхронизации HMA.
 
+{vpnhide_install}
 SHA-256 (`{archive.name}`):
 ```text
 {digest}
 ```
 
-Благодарности: 0ctobot (SELinux timing-патч), авторы HMA/UIDFAKE, KernelSU Next, pershoot, simonpunk, maxsteeel, WildKernels и разработчики включённых компонентов.
+Благодарности: okhsunrog (VPNHide), 0ctobot (SELinux timing-патч), авторы HMA/UIDFAKE, KernelSU Next, pershoot, simonpunk, maxsteeel, WildKernels и разработчики включённых компонентов.
 '''
 notes_path = root / 'release-notes.md'
 notes_path.write_text(notes)

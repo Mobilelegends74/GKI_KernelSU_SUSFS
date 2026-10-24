@@ -32,13 +32,31 @@ for release in [dict(tag_name='dev', draft=False, prerelease=False),
     else:
         raise AssertionError('Accepted a non-stable release')
 
+spec = importlib.util.spec_from_file_location('vph_resolver', root / 'scripts/resolve-vpnhide-ci.py')
+vph = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(vph)
+good = dict(id=123, run_number=4, head_sha='f' * 40, status='completed', conclusion='success',
+            head_branch='main', event='push', head_repository={'full_name': 'okhsunrog/vpnhide'})
+bad_runs = [dict(good, id=124, run_number=5, conclusion='failure'),
+            dict(good, id=125, run_number=6, event='pull_request'),
+            dict(good, id=126, run_number=7, head_repository={'full_name': 'other/fork'})]
+assert vph.resolve(Mock(return_value=json.dumps({'workflow_runs': bad_runs + [good]})))['vpnhide_sha'] == 'f' * 40
+try:
+    vph.resolve(Mock(return_value=json.dumps({'workflow_runs': bad_runs})))
+except ValueError:
+    pass
+else:
+    raise AssertionError('Selected an unverified upstream CI')
+
 for modern in (False, True):
     metadata = dict(GITHUB_SHA='a' * 40, GITHUB_RUN_ID='1', KSU_VERSION='33405',
                     KSUN_COMMIT='b' * 40, SUSFS_SHA='c' * 40, susfs_version='v2.3.0',
                     NOMOUNT_SHA='7046c7ad3ee0bf4ae66e80f6b93b1e30db0cb4e3')
     if modern:
         metadata.update(NOMOUNT_TAG='v9.2.0', NOMOUNT_SHA='d' * 40,
-                        SELINUX_TIMING_PATCH='ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a')
+                        SELINUX_TIMING_PATCH='ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a',
+                        VPNHIDE_COMMIT_SHA='f' * 40,
+                        VPNHIDE_RUN_URL='https://github.com/okhsunrog/vpnhide/actions/runs/123')
     with tempfile.TemporaryDirectory(prefix='gki-release-notes-test-') as tmp:
         with zipfile.ZipFile(Path(tmp) / 'AK3_test_UIDFAKE.zip', 'w') as z:
             z.writestr('uidfake/build-metadata.json', json.dumps(metadata))
@@ -59,6 +77,9 @@ for modern in (False, True):
             assert '/nomount/commit/' + 'd' * 40 in notes
             assert 'v2.1.1' not in notes
             assert 'KernelSU/pull/3938' in notes
+            assert '/vpnhide/commit/' + 'f' * 40 in notes
+            assert metadata['VPNHIDE_RUN_URL'] in notes
+            assert 'built-in companion' in notes
         else:
             assert '/nomount/releases/tag/v2.1.1' in notes
 
@@ -69,4 +90,5 @@ assert 'EXPECTED_NM_SHA' in action
 build = (root / '.github/workflows/build.yml').read_text()
 assert build.index('Apply reviewed SELinux timing backport') < build.index('Build Normal Kernel')
 assert build.index('Apply reviewed SELinux timing backport') < build.index('Build Bypass Kernel')
+assert build.index('Integrate native HMA UIDFAKE') < build.index('Integrate VPNHide built-in') < build.index('Build Normal Kernel')
 print('OK: stable release resolution, annotated tags, safe refusal, actual-component links, legacy notes and patch ordering')

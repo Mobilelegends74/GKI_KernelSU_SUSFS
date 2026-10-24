@@ -209,7 +209,7 @@ jobs:
         fi
 
         if [[ "$GITHUB_REF_NAME" == UIDFAKE-* ]]; then
-          AK3_NAME="${AK3_NAME}_UIDFAKE"
+          AK3_NAME="${AK3_NAME}_VPNHIDE_UIDFAKE"
         fi
         echo "AnyKernel3 artifact name: $AK3_NAME"
         echo "AK3_ARTIFACT_NAME=$AK3_NAME" >> "$GITHUB_ENV"
@@ -459,6 +459,13 @@ jobs:
         python3 scripts/uidfake-test-native.py
         bash scripts/uidfake-integrate-kernel.sh "$GITHUB_WORKSPACE/kernel/common"
         python3 scripts/uidfake-check-kabi.py "$GITHUB_WORKSPACE/kernel/common"
+
+    - name: Integrate VPNHide built-in from latest successful upstream CI
+      if: startsWith(github.ref_name, 'UIDFAKE-') && inputs.version == 'android14-6.1'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: bash scripts/integrate-vpnhide-gki.sh
 
     - name: Build Normal Kernel
       env:

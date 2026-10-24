@@ -38,6 +38,13 @@ with zipfile.ZipFile(archive) as z:
     assert 'hma_uidfake-y := core.o policy.o netlink.o' in patch
     assert archive.name.endswith('_UIDFAKE.zip'), 'archive label missing'
     metadata = json.loads(z.read('uidfake/build-metadata.json'))
+    if metadata.get('VPNHIDE_COMMIT_SHA'):
+        assert b'vpnhide_ctl' in image and b'vpnhide_ctl' in bypass
+        config = z.read('uidfake/kernel.config').decode().splitlines()
+        assert 'CONFIG_VPNHIDE=y' in config and 'CONFIG_VPNHIDE_FS_HIDING=y' in config
+        assert hashlib.sha256(z.read('vpnhide/vpnhide.patch')).hexdigest() == metadata['VPNHIDE_PATCH_SHA256']
+        assert {'vpnhide/report.json', 'vpnhide/report.md', 'vpnhide/LICENSE', 'vpnhide/README.md'} <= names
+        assert not any(n.endswith('.ko') and 'vpnhide' in n.lower() for n in names)
     if metadata.get('SELINUX_TIMING_PATCH'):
         assert metadata['SELINUX_TIMING_PATCH'] == 'ec7eb93621c40c0cc2c304cca9c0ca43b7d4c23a'
         assert hashlib.sha256(z.read('uidfake/selinux-timing.patch')).hexdigest() == metadata['SELINUX_PATCH_SHA256']
