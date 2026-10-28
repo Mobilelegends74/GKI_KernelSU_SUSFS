@@ -47,37 +47,54 @@ jobs:
           git config --global user.name 'GKI CI'
           git config --global user.email 'gki-ci@users.noreply.github.com'
 
-      - name: Sync official Android 16 GKI 6.12.23 sources
+      - name: Restore clean official GKI source cache
+        id: source_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: source/
+          key: redmagic11pro-gki-61223-r4-clean-v1
+
+      - name: Sync or reuse official Android 16 GKI 6.12.23
         run: |
           set -euo pipefail
-          mkdir source
+          mkdir -p source
           cd source
-          ../repo init --depth=1 \
-            -u https://android.googlesource.com/kernel/manifest \
-            -b common-android16-6.12-2025-06 --repo-rev=v2.16
-          # Monthly branches can become non-fetchable after GKI deprecation.
-          # Pin the published release tag (6.12.23) using a repo local
-          # manifest rather than trying to checkout a retired branch.
-          mkdir -p .repo/local_manifests
-          cat > .repo/local_manifests/pin-gki-6.12.23.xml <<'EOF'
+          EXPECTED_SHA=fd24ac115ce61cc9712122de27ca5b7f8920a8f5
+          if [ -d .repo ] && [ -f common/Makefile ] && [ -x tools/bazel ] \
+            && [ "$(git -C common rev-parse HEAD 2>/dev/null || true)" = "$EXPECTED_SHA" ]; then
+            echo "::notice::Validated clean GKI source cache; skipping repo sync"
+          else
+            echo "::notice::Cache miss; syncing official GKI source"
+            ../repo init --depth=1 \
+              -u https://android.googlesource.com/kernel/manifest \
+              -b common-android16-6.12-2025-06 --repo-rev=v2.16
+            mkdir -p .repo/local_manifests
+            cat > .repo/local_manifests/pin-gki-6.12.23.xml <<'EOF'
           <manifest>
             <extend-project name="kernel/common"
                             revision="refs/tags/android16-6.12-2025-06_r4" />
           </manifest>
           EOF
-          echo "Pinning kernel/common to android16-6.12-2025-06_r4"
-          ../repo sync -j4 --no-clone-bundle --retry-fetches=3
-          echo "Kernel common SHA: $(git -C common rev-parse HEAD)"
-          test "$(git -C common rev-parse HEAD)" = "fd24ac115ce61cc9712122de27ca5b7f8920a8f5" || {
-            echo "::error::Unexpected kernel/common SHA"; exit 1;
-          }
+            ../repo sync -j4 --no-clone-bundle --retry-fetches=3
+          fi
+          SHA=$(git -C common rev-parse HEAD)
+          echo "Kernel common SHA: $SHA"
+          test "$SHA" = "$EXPECTED_SHA" || { echo "::error::Source SHA mismatch"; exit 1; }
+          test -x tools/bazel
           V=$(sed -n 's/^VERSION = //p' common/Makefile | head -1)
           P=$(sed -n 's/^PATCHLEVEL = //p' common/Makefile | head -1)
           S=$(sed -n 's/^SUBLEVEL = //p' common/Makefile | head -1)
           echo "Source kernel version: $V.$P.$S"
-          test "$V.$P.$S" = '6.12.23' || {
-            echo "::error::Wrong GKI kernel version; refusing to build"; exit 1;
-          }
+          test "$V.$P.$S" = 6.12.23 || { echo "::error::Wrong GKI version"; exit 1; }
+
+      # Commit this cache immediately, BEFORE applying any BakaSU/SUSFS patches.
+      # A later failure won't invalidate the downloaded clean source.
+      - name: Save clean GKI source cache
+        if: ${{ success() && steps.source_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: source/
+          key: redmagic11pro-gki-61223-r4-clean-v1
 
       - name: Integrate BakaSU (formerly ReSukiSU)
         run: |
@@ -143,11 +160,73 @@ jobs:
           echo "Requested EFISP switches:"
           grep -E 'CONFIG_(POSIX_MQUEUE|DEVTMPFS)' "$DEFCONFIG"
 
+      - name: Restore Bazel incremental cache
+        id: bazel_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .bazel-disk-cache/
+          key: redmagic11pro-gki-61223-bazel-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            redmagic11pro-gki-61223-bazel-v1-
+
+      - name: Normalize gki_defconfig using official Kleaf configuration tool
+        run: |
+          set -euo pipefail
+          mkdir -p .bazel-disk-cache
+          cd source
+          tools/bazel run --config=fast --lto=thin \
+            --disk_cache="$GITHUB_WORKSPACE/.bazel-disk-cache" \
+            //common:kernel_aarch64_config
+          test -s common/arch/arm64/configs/gki_defconfig
+
       - name: Build official GKI target using Bazel (O2 / ThinLTO)
         run: |
           set -euo pipefail
           cd source
-          tools/bazel build --config=fast --lto=thin //common:kernel_aarch64_dist
+          tools/bazel build --config=fast --lto=thin \
+            --disk_cache="$GITHUB_WORKSPACE/.bazel-disk-cache" \
+            //common:kernel_aarch64_dist
+
+      - name: Prune Bazel cache to 1.5 GiB for GitHub storage
+        if: ${{ always() && steps.bazel_cache.conclusion == 'success' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(".bazel-disk-cache")
+          if not root.exists():
+              print("No Bazel cache yet")
+              raise SystemExit(0)
+          entries = []
+          for base, dirs, files in os.walk(root):
+              for name in files:
+                  f = Path(base) / name
+                  try:
+                      st = f.stat()
+                      entries.append((st.st_mtime, st.st_size, f))
+                  except FileNotFoundError:
+                      pass
+          total = sum(e[1] for e in entries)
+          budget = 1536 * 1024 * 1024
+          print(f"Disk cache before: {total / 1048576:.1f} MiB")
+          if total > budget:
+              for _, size, f in sorted(entries, key=lambda e: e[0]):
+                  try:
+                      f.unlink()
+                      total -= size
+                  except FileNotFoundError:
+                      pass
+                  if total <= budget:
+                      break
+          print(f"Disk cache after: {total / 1048576:.1f} MiB")
+          PY
+
+      - name: Save Bazel cache even if compilation fails
+        if: ${{ always() && steps.bazel_cache.conclusion == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .bazel-disk-cache/
+          key: redmagic11pro-gki-61223-bazel-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Verify outputs and effective Kconfig where available
         run: |
