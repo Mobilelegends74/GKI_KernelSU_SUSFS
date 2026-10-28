@@ -55,34 +55,22 @@ jobs:
           ../repo init --depth=1 \
             -u https://android.googlesource.com/kernel/manifest \
             -b common-android16-6.12-2025-06 --repo-rev=v2.16
-          BRANCH=android16-6.12-2025-06
-          REMOTE=https://android.googlesource.com/kernel/common
-          if git ls-remote --heads "$REMOTE" "$BRANCH" | grep -q .; then
-            echo "Using active June 2025 branch"
-          elif git ls-remote --heads "$REMOTE" "deprecated/$BRANCH" | grep -q .; then
-            echo "Using deprecated June 2025 branch"
-            python3 - <<'PY'
-          from pathlib import Path
-          p = Path(".repo/manifests/default.xml")
-          old = p.read_text()
-          new = old.replace('revision="android16-6.12-2025-06"', 'revision="deprecated/android16-6.12-2025-06"')
-          if old == new:
-              raise SystemExit("Cannot locate GKI revision in manifest")
-          p.write_text(new)
-          PY
-          else
-            echo "Monthly branch unavailable; using Google's published 6.12.23 release tag _r2"
-            python3 - <<'PY'
-          from pathlib import Path
-          p = Path(".repo/manifests/default.xml")
-          old = p.read_text()
-          new = old.replace('revision="android16-6.12-2025-06"', 'revision="refs/tags/android16-6.12-2025-06_r2"')
-          if old == new:
-              raise SystemExit("Cannot locate GKI revision in manifest")
-          p.write_text(new)
-          PY
-          fi
-          ../repo sync -c -j4 --no-tags --no-clone-bundle --retry-fetches=3
+          # Monthly branches can become non-fetchable after GKI deprecation.
+          # Pin the published release tag (6.12.23) using a repo local
+          # manifest rather than trying to checkout a retired branch.
+          mkdir -p .repo/local_manifests
+          cat > .repo/local_manifests/pin-gki-6.12.23.xml <<'EOF'
+          <manifest>
+            <extend-project name="kernel/common"
+                            revision="refs/tags/android16-6.12-2025-06_r4" />
+          </manifest>
+          EOF
+          echo "Pinning kernel/common to android16-6.12-2025-06_r4"
+          ../repo sync -j4 --no-clone-bundle --retry-fetches=3
+          echo "Kernel common SHA: $(git -C common rev-parse HEAD)"
+          test "$(git -C common rev-parse HEAD)" = "fd24ac115ce61cc9712122de27ca5b7f8920a8f5" || {
+            echo "::error::Unexpected kernel/common SHA"; exit 1;
+          }
           V=$(sed -n 's/^VERSION = //p' common/Makefile | head -1)
           P=$(sed -n 's/^PATCHLEVEL = //p' common/Makefile | head -1)
           S=$(sed -n 's/^SUBLEVEL = //p' common/Makefile | head -1)
