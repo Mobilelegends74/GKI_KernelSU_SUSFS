@@ -169,15 +169,33 @@ jobs:
           restore-keys: |
             redmagic11pro-gki-61223-bazel-v1-
 
-      - name: Normalize gki_defconfig using official Kleaf configuration tool
+      - name: Normalize gki_defconfig with Kconfig before Bazel
         run: |
           set -euo pipefail
-          mkdir -p .bazel-disk-cache
-          cd source
-          tools/bazel run --config=fast --lto=thin \
-            --disk_cache="$GITHUB_WORKSPACE/.bazel-disk-cache" \
-            //common:kernel_aarch64_config
-          test -s common/arch/arm64/configs/gki_defconfig
+          cd source/common
+          CONFIG_OUT="$(mktemp -d "$RUNNER_TEMP/gki-kconfig.XXXXXX")"
+          echo "Preparing the kernel .config from requested gki_defconfig"
+          make O="$CONFIG_OUT" ARCH=arm64 gki_defconfig
+          test -s "$CONFIG_OUT/.config"
+          # Never silently replace required EFISP and SUSFS options.
+          for opt in CONFIG_KSU CONFIG_KSU_SUSFS; do
+            grep -qx "$opt=y" "$CONFIG_OUT/.config" || {
+              echo "::error::$opt did not survive Kconfig dependency resolution"; exit 1;
+            }
+          done
+          for opt in CONFIG_POSIX_MQUEUE CONFIG_DEVTMPFS; do
+            grep -qx "# $opt is not set" "$CONFIG_OUT/.config" || {
+              echo "::error::$opt unexpectedly enabled by Kconfig"; exit 1;
+            }
+          done
+          echo "Generating canonical minimal defconfig BEFORE invoking Bazel/Kleaf"
+          make O="$CONFIG_OUT" ARCH=arm64 savedefconfig
+          test -s "$CONFIG_OUT/defconfig"
+          cp "$CONFIG_OUT/defconfig" arch/arm64/configs/gki_defconfig
+          echo "Canonical config lines:"
+          grep -E 'CONFIG_(KSU|KSU_SUSFS|TMPFS_POSIX_ACL|POSIX_MQUEUE|DEVTMPFS)' \
+            "$CONFIG_OUT/.config" | head -25
+          echo "Normalized gki_defconfig is ready for Kleaf's strict validation"
 
       - name: Build official GKI target using Bazel (O2 / ThinLTO)
         run: |
