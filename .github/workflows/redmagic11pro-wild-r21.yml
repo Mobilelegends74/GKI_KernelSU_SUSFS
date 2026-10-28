@@ -1,0 +1,40 @@
+name: RedMagic 11 Pro EFISP from WildKernels r21 (GKI 6.12.23)
+
+on:
+  push:
+    branches:
+      - redmagic11pro-wild-r21-6.12.23-efisp
+    paths:
+      - '.github/workflows/redmagic11pro-wild-r21.yml'
+      - '.github/workflows/redmagic11pro-wild-r21-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  wild-r21-resukisu:
+    name: Rebuild original WildKernels r21 with two Kconfig options disabled
+    uses: ./.github/workflows/redmagic11pro-wild-r21-build.yml
+    with:
+      version: android16-6.12
+      android_version: android16
+      kernel_version: '6.12'
+      sublevel: '23'
+      os_patch_level: '2025-06'
+      variant: ReSukiSU
+      feature_set: SUSFS+NoMount+BBG+NET+DS+NTSync+Ptrace+Unicode+BPF+Perf
+      root_flavor: resukisu
+      root_commit: 94dd3c93c2053a84fd752df6eb85db99b7d70ab8
+      susfs_commit: b213c54126fb243595ce7876e91d84d6e0861fec
+      nomount_commit: 5a610db7649a59eb3e3d710653618d594941f8da
+      kernel_patches_commit: 41ae18b35d20e0c6ac04116785a4a1089528ae94
+      anykernel3_commit: e1e9dce98430c5c6f231f7094a8c7f4ecaf50948
+      droidspaces_commit: 434d795d80f34852251599cf412841c493aa7177
+      brand_name: Wild
+      keep_kmi: false
+      allow_version_mismatch: false
+      use_cache: true
+      page_size: 4k
+    secrets: inherit
