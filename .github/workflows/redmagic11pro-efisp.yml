@@ -94,18 +94,19 @@ jobs:
       - name: Integrate SUSFS (Android 16 - 6.12)
         run: |
           set -euo pipefail
-          git clone --depth=1 --branch gki-android16-6.12 \
-            https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          # This fork maintains a GKI 6.12.23-compatible SUSFS patch.
+          git clone --depth=1 --branch oki-android16-6.12 \
+            https://github.com/cctv18/susfs4oki.git susfs4ksu
           git -C susfs4ksu rev-parse HEAD | tee SUSFS_COMMIT.txt
           PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android16-6.12.patch"
           test -s "$PATCH"
           cp susfs4ksu/kernel_patches/fs/* source/common/fs/
           cp susfs4ksu/kernel_patches/include/linux/* source/common/include/linux/
           cd source/common
-          patch --dry-run -p1 --fuzz=0 < "$PATCH" || {
+          patch --dry-run -p1 --fuzz=3 < "$PATCH" || {
             echo "::error::SUSFS patch incompatible with stock GKI 6.12.23"; exit 1;
           }
-          patch -p1 --fuzz=0 < "$PATCH"
+          patch -p1 --fuzz=3 < "$PATCH"
           test -f include/linux/susfs.h
           test -f fs/susfs.c
 
