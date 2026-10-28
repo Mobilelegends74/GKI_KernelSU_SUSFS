@@ -745,8 +745,10 @@ jobs:
         if-no-files-found: ignore
         compression-level: 9
 
+    # This single-target workflow does not generate a standalone NoMount-Metamodule.
+    # Do not fail the successful AK3 kernel build during optional metadata lookup.
     - name: Write Build-verified only artifact metadata
-      if: success() && inputs.root_flavor != '' && inputs.root_flavor != 'none'
+      if: false
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
