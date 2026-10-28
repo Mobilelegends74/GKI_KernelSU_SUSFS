@@ -1,0 +1,215 @@
+name: RedMagic 11 Pro EFISP BakaSU GKI 6.12.23
+
+on:
+  push:
+    branches:
+      - redmagic11pro-efisp-bakasu-6.12.23
+    paths:
+      - .github/workflows/redmagic11pro-efisp.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: redmagic11pro-efisp-6.12.23
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Android 16 GKI 6.12.23 BakaSU + SUSFS (EFISP experiment)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout isolated build branch
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Install GKI build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git git-lfs curl ca-certificates python3 unzip zip rsync bc \
+            build-essential clang lld flex bison libssl-dev libelf-dev \
+            libncurses-dev zlib1g-dev liblz4-tool dwarves jq file ccache
+          curl --fail --location --retry 4 \
+            https://storage.googleapis.com/git-repo-downloads/repo -o repo
+          chmod +x repo
+          git config --global user.name 'GKI CI'
+          git config --global user.email 'gki-ci@users.noreply.github.com'
+
+      - name: Sync official Android 16 GKI 6.12.23 sources
+        run: |
+          set -euo pipefail
+          mkdir source
+          cd source
+          ../repo init --depth=1 \
+            -u https://android.googlesource.com/kernel/manifest \
+            -b common-android16-6.12-2025-06 --repo-rev=v2.16
+          BRANCH=android16-6.12-2025-06
+          REMOTE=https://android.googlesource.com/kernel/common
+          if git ls-remote --heads "$REMOTE" "$BRANCH" | grep -q .; then
+            echo "Using active June 2025 branch"
+          elif git ls-remote --heads "$REMOTE" "deprecated/$BRANCH" | grep -q .; then
+            echo "Using deprecated June 2025 branch"
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".repo/manifests/default.xml")
+          old = p.read_text()
+          new = old.replace('revision="android16-6.12-2025-06"', 'revision="deprecated/android16-6.12-2025-06"')
+          if old == new:
+              raise SystemExit("Cannot locate GKI revision in manifest")
+          p.write_text(new)
+          PY
+          else
+            echo "Monthly branch unavailable; using Google's published 6.12.23 release tag _r2"
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".repo/manifests/default.xml")
+          old = p.read_text()
+          new = old.replace('revision="android16-6.12-2025-06"', 'revision="refs/tags/android16-6.12-2025-06_r2"')
+          if old == new:
+              raise SystemExit("Cannot locate GKI revision in manifest")
+          p.write_text(new)
+          PY
+          fi
+          ../repo sync -c -j4 --no-tags --no-clone-bundle --retry-fetches=3
+          V=$(sed -n 's/^VERSION = //p' common/Makefile | head -1)
+          P=$(sed -n 's/^PATCHLEVEL = //p' common/Makefile | head -1)
+          S=$(sed -n 's/^SUBLEVEL = //p' common/Makefile | head -1)
+          echo "Source kernel version: $V.$P.$S"
+          test "$V.$P.$S" = '6.12.23' || {
+            echo "::error::Wrong GKI kernel version; refusing to build"; exit 1;
+          }
+
+      - name: Integrate BakaSU (formerly ReSukiSU)
+        run: |
+          set -euo pipefail
+          cd source
+          curl --fail --location --retry 4 \
+            https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh \
+            -o /tmp/bakasu-setup.sh
+          bash /tmp/bakasu-setup.sh main
+          test -e common/drivers/kernelsu
+          test -d KernelSU/kernel
+          git -C KernelSU rev-parse HEAD | tee "$GITHUB_WORKSPACE/BAKASU_COMMIT.txt"
+
+      - name: Integrate SUSFS (Android 16 - 6.12)
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch gki-android16-6.12 \
+            https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          git -C susfs4ksu rev-parse HEAD | tee SUSFS_COMMIT.txt
+          PATCH="$GITHUB_WORKSPACE/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android16-6.12.patch"
+          test -s "$PATCH"
+          cp susfs4ksu/kernel_patches/fs/* source/common/fs/
+          cp susfs4ksu/kernel_patches/include/linux/* source/common/include/linux/
+          cd source/common
+          patch --dry-run -p1 --fuzz=0 < "$PATCH" || {
+            echo "::error::SUSFS patch incompatible with stock GKI 6.12.23"; exit 1;
+          }
+          patch -p1 --fuzz=0 < "$PATCH"
+          test -f include/linux/susfs.h
+          test -f fs/susfs.c
+
+      - name: Configure BakaSU, SUSFS and EFISP test switches
+        run: |
+          set -euo pipefail
+          cd source/common
+          DEFCONFIG=arch/arm64/configs/gki_defconfig
+          test -f "$DEFCONFIG"
+          cat >> "$DEFCONFIG" <<'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          EOF
+          # Real Kconfig changes, not the harmless '# CONFIG_X=y' comments.
+          scripts/config --file "$DEFCONFIG" --disable POSIX_MQUEUE --disable DEVTMPFS
+          grep -qx '# CONFIG_POSIX_MQUEUE is not set' "$DEFCONFIG"
+          grep -qx '# CONFIG_DEVTMPFS is not set' "$DEFCONFIG"
+          ! grep -q '^CONFIG_POSIX_MQUEUE=y' "$DEFCONFIG"
+          ! grep -q '^CONFIG_DEVTMPFS=y' "$DEFCONFIG"
+          grep -qx 'CONFIG_KSU=y' "$DEFCONFIG"
+          grep -qx 'CONFIG_KSU_SUSFS=y' "$DEFCONFIG"
+          echo "Requested EFISP switches:"
+          grep -E 'CONFIG_(POSIX_MQUEUE|DEVTMPFS)' "$DEFCONFIG"
+
+      - name: Build official GKI target using Bazel (O2 / ThinLTO)
+        run: |
+          set -euo pipefail
+          cd source
+          tools/bazel build --config=fast --lto=thin //common:kernel_aarch64_dist
+
+      - name: Verify outputs and effective Kconfig where available
+        run: |
+          set -euo pipefail
+          IMAGE=source/bazel-bin/common/kernel_aarch64/Image
+          test -s "$IMAGE"
+          mkdir -p out
+          cp -L "$IMAGE" out/Image
+          {
+            echo "Device: RedMagic 11 Pro"
+            echo "Source: Android 16 GKI 6.12.23 (2025-06)"
+            echo "Root: BakaSU (previously ReSukiSU)"
+            echo "BakaSU commit: $(cat BAKASU_COMMIT.txt)"
+            echo "SUSFS commit: $(cat SUSFS_COMMIT.txt)"
+            echo "Experimental disabled options: POSIX_MQUEUE, DEVTMPFS"
+          } | tee out/BUILD-INFO.txt
+          cp source/common/arch/arm64/configs/gki_defconfig out/requested-gki_defconfig
+          VERIFIED=0
+          while IFS= read -r cfg; do
+            if grep -q '^CONFIG_KSU=y' "$cfg"; then
+              echo "Checking generated config $cfg"
+              grep -qx '# CONFIG_POSIX_MQUEUE is not set' "$cfg"
+              grep -qx '# CONFIG_DEVTMPFS is not set' "$cfg"
+              grep -qx 'CONFIG_KSU_SUSFS=y' "$cfg"
+              cp "$cfg" out/effective-kernel.config
+              VERIFIED=1
+              break
+            fi
+          done < <(find -L source/bazel-out -name .config -type f 2>/dev/null | head -30)
+          if [ "$VERIFIED" -eq 0 ]; then
+            echo "Effective .config not located in Bazel output; requested config only" | tee -a out/BUILD-INFO.txt
+          else
+            echo "Effective .config passed EFISP config assertions" | tee -a out/BUILD-INFO.txt
+          fi
+
+      - name: Package experimental AnyKernel3 ZIP
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch gki-2.0 \
+            https://github.com/WildKernels/AnyKernel3.git AnyKernel3
+          cp out/Image AnyKernel3/Image
+          rm -rf AnyKernel3/.git
+          (cd AnyKernel3 && zip -q -r -9 \
+            ../out/RedMagic11Pro-GKI-6.12.23-BakaSU-SUSFS-EFISP-TEST.zip .)
+          (cd out && sha256sum Image *.zip > SHA256SUMS)
+          ls -lah out
+
+      - name: Upload experimental artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: RedMagic11Pro-GKI-6.12.23-BakaSU-EFISP-TEST
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
